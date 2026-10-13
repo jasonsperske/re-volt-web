@@ -6,7 +6,7 @@ use std::rc::Rc;
 use glam::{Mat4, Vec3};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlShader, WebGlTexture,
+    HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlShader, WebGlTexture,
     WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
@@ -170,6 +170,41 @@ impl Renderer {
                 self.gl.delete_texture(Some(&t));
             }
         }
+    }
+
+    /// Draws into `framebuffer` (a WebXR layer) instead of the canvas, or
+    /// back to the canvas with `None`.
+    pub fn bind_framebuffer(&self, framebuffer: Option<&WebGlFramebuffer>) {
+        self.gl.bind_framebuffer(Gl::FRAMEBUFFER, framebuffer);
+    }
+
+    pub fn set_viewport(&self, [x, y, w, h]: [i32; 4]) {
+        self.gl.viewport(x, y, w, h);
+    }
+
+    /// Copies a 2-D canvas into a texture (creating it when `into` is
+    /// `None`), for overlays drawn in the 3-D scene.
+    pub fn canvas_texture(&self, canvas: &HtmlCanvasElement, into: Option<&WebGlTexture>) -> Result<Option<WebGlTexture>, JsValue> {
+        let gl = &self.gl;
+        let created = match into {
+            Some(_) => None,
+            None => Some(gl.create_texture().ok_or("create_texture failed")?),
+        };
+        let tex = into.or(created.as_ref()).expect("texture");
+        gl.bind_texture(Gl::TEXTURE_2D, Some(tex));
+        gl.tex_image_2d_with_u32_and_u32_and_html_canvas_element(Gl::TEXTURE_2D, 0, Gl::RGBA as i32, Gl::RGBA, Gl::UNSIGNED_BYTE, canvas)?;
+        gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_MIN_FILTER, Gl::LINEAR as i32);
+        gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_MAG_FILTER, Gl::LINEAR as i32);
+        gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_S, Gl::CLAMP_TO_EDGE as i32);
+        gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_WRAP_T, Gl::CLAMP_TO_EDGE as i32);
+        Ok(created)
+    }
+
+    /// Like [`Renderer::draw`], but over everything already drawn.
+    pub fn draw_on_top(&self, scenes: &[(&GpuScene, Mat4)], view_proj: Mat4, eye: Vec3, fog: &Fog) {
+        self.gl.disable(Gl::DEPTH_TEST);
+        self.draw(scenes, view_proj, eye, fog);
+        self.gl.enable(Gl::DEPTH_TEST);
     }
 
     pub fn begin(&self, fog: &Fog) {

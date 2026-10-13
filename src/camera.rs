@@ -20,9 +20,39 @@ pub struct FlyInput {
     pub boost: bool,
 }
 
-/// Distance behind and height above the car's look point.
-const BOOM_BACK: f32 = 230.0;
-const BOOM_UP: f32 = 85.0;
+/// Chase camera framings. `Default` is the original framing; the others
+/// are new to this version.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ChaseView {
+    Default,
+    /// Further back and higher, to see more of the track.
+    Far,
+    /// Just behind the car and close to the ground, looking ahead.
+    Low,
+}
+
+impl ChaseView {
+    pub const ALL: [ChaseView; 3] = [ChaseView::Default, ChaseView::Far, ChaseView::Low];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ChaseView::Default => "Chase cam",
+            ChaseView::Far => "Far chase cam",
+            ChaseView::Low => "Low chase cam",
+        }
+    }
+
+    /// Distance behind and height above the car's look point, and how far
+    /// ahead of the car the camera aims.
+    fn boom(self) -> (f32, f32, f32) {
+        match self {
+            ChaseView::Default => (230.0, 85.0, 0.0),
+            ChaseView::Far => (400.0, 150.0, 0.0),
+            ChaseView::Low => (175.0, 30.0, 320.0),
+        }
+    }
+}
+
 /// Look point height above the car origin.
 const LOOK_UP: f32 = 25.0;
 /// Larger moves than this between frames are teleports (restart, reset).
@@ -33,6 +63,8 @@ pub struct Camera {
     pub yaw: f32,
     pub pitch: f32,
     pub mode: CameraMode,
+    /// Framing used in chase mode.
+    pub view: ChaseView,
     /// Extra orbit angle around the car set by the look controls in chase mode.
     pub orbit: f32,
     /// Smoothed chase state: look point, heading and camera offset.
@@ -43,7 +75,27 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(pos: Vec3, yaw: f32, pitch: f32) -> Self {
-        Camera { pos, yaw, pitch, mode: CameraMode::Chase, orbit: 0.0, target: None, heading: Vec3::NEG_Z, offset: Vec3::ZERO }
+        Camera { pos, yaw, pitch, mode: CameraMode::Chase, view: ChaseView::Default, orbit: 0.0, target: None, heading: Vec3::NEG_Z, offset: Vec3::ZERO }
+    }
+
+    /// Steps through the chase framings, then the free camera, then back.
+    pub fn next_mode(&mut self) {
+        let i = ChaseView::ALL.iter().position(|v| *v == self.view).unwrap_or(0);
+        match self.mode {
+            CameraMode::Chase if i + 1 < ChaseView::ALL.len() => self.view = ChaseView::ALL[i + 1],
+            CameraMode::Chase => self.mode = CameraMode::Free,
+            CameraMode::Free => {
+                self.mode = CameraMode::Chase;
+                self.view = ChaseView::Default;
+            }
+        }
+    }
+
+    pub fn mode_name(&self) -> &'static str {
+        match self.mode {
+            CameraMode::Chase => self.view.name(),
+            CameraMode::Free => "Free cam",
+        }
     }
 
     pub fn forward(&self) -> Vec3 {
@@ -85,11 +137,13 @@ impl Camera {
         self.target = Some(target);
         self.heading = if snap { flat } else { self.heading.lerp(flat, ease(6.0)).normalize_or(flat) };
 
+        // Switching framings eases over, like any other change of offset.
+        let (boom_back, boom_up, ahead) = self.view.boom();
         let back = Quat::from_rotation_y(-self.orbit) * -self.heading;
-        let wanted = back * BOOM_BACK + Vec3::Y * BOOM_UP;
+        let wanted = back * boom_back + Vec3::Y * boom_up;
         self.offset = if snap { wanted } else { self.offset.lerp(wanted, ease(8.0)) };
         self.pos = limit(target, target + self.offset);
-        self.look_at(target);
+        self.look_at(target - back * ahead);
     }
 
     /// Puts the camera straight behind the car (e.g. on the start line).

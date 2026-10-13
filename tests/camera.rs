@@ -81,3 +81,32 @@ fn chase_camera_is_smoother_than_before() {
     assert!(nd < od * 0.5, "view direction should jerk at most half as much");
     assert!(nrl < orl * 0.5, "the car should jump around on screen at most half as much");
 }
+
+#[test]
+fn chase_framings_differ_as_described() {
+    use revolt_web::camera::{CameraMode, ChaseView};
+    // A car at the origin facing -Z (GL space, Y up).
+    let frame = |view: ChaseView| {
+        let mut cam = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        cam.view = view;
+        cam.snap_behind(Vec3::ZERO, Vec3::NEG_Z);
+        (cam.pos, cam.pitch)
+    };
+    let (default, default_pitch) = frame(ChaseView::Default);
+    let (far, _) = frame(ChaseView::Far);
+    let (low, low_pitch) = frame(ChaseView::Low);
+    println!("default {default:?} pitch {default_pitch:.2}, far {far:?}, low {low:?} pitch {low_pitch:.2}");
+    assert!(far.z > default.z && far.y > default.y, "far is further back and higher");
+    assert!(low.z < default.z && low.y < default.y, "low is closer and lower");
+    assert!(low_pitch.abs() < default_pitch.abs() / 2.0, "low looks more straight ahead");
+
+    // C cycles chase → far → low → free → chase.
+    let mut cam = Camera::new(Vec3::ZERO, 0.0, 0.0);
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        cam.next_mode();
+        seen.push(cam.mode_name());
+    }
+    assert_eq!(seen, ["Far chase cam", "Low chase cam", "Free cam", "Chase cam"]);
+    assert_eq!(cam.mode, CameraMode::Chase);
+}

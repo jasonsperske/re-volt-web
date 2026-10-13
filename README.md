@@ -61,6 +61,24 @@ speed, steering speed and downforce, each from 50% to 200% of stock.
 Changes are saved in your browser for each car and used in every race with
 it. **Reset to Stock** puts a car back the way it came.
 
+### VR
+
+With a VR headset (for example a Meta Quest, in its browser), an **Enter VR**
+button appears during races. You ride along with the chase camera at RC-car
+size, with a panel ahead of you showing your position, lap, weapon and the
+countdown. The menus stay on the flat screen, so pausing or finishing a race
+leaves VR.
+
+| VR controllers | |
+|---|---|
+| Accelerate | Right trigger |
+| Brake / reverse | Left trigger |
+| Steer | Either thumbstick |
+| Fire weapon | A |
+| Flip car | B |
+| Change camera | X |
+| Pause (leaves VR) | Y |
+
 ### Controls
 
 | | Keyboard | Gamepad |
@@ -73,7 +91,7 @@ it. **Reset to Stock** puts a car back the way it came.
 | Flip car back onto its wheels | F (or the **Flip car** button) | LB |
 | Restart race | R | Y |
 | Pause menu | Esc | Start |
-| Free camera on/off | C | Back |
+| Change camera: chase, far, low, free | C | Back |
 | Music / sound on/off | M / N | |
 
 In the menus, use the arrow keys or D-pad to move and change values, Enter or
@@ -107,6 +125,8 @@ A to select, and Esc or B to go back. The mouse works too.
 - **Pickups and all 10 weapons**, also ported from the original.
 - **The original 3-D toy-shop menus:** the same camera moves, font and car boxes.
 - **AI opponents, laps, race positions, results, CD music and sound effects.**
+- **New in this version:** a workbench for renaming and tuning cars, extra
+  camera views, and VR.
 
 The AI drivers and the lap/position rules are new designs built on the game's
 own track data. Championship, Multi-Player, Battle Tag, Best Trial Times and
@@ -135,6 +155,7 @@ npm install && npm run e2e    # headless Chrome; needs `npm run serve` running
 npm run e2e:loading  # the loading bar, from a fresh pick and from the browser cache
 npm run e2e:credits  # the credits, on the start screen and in the toy shop
 npm run e2e:workbench  # renaming and tuning a car on the workbench
+npm run e2e:vr       # VR mode, with a stand-in WebXR device
 npm run tour         # screenshots every menu screen into e2e/shots/
 npm run screenshots  # retakes the README screenshots in docs/screenshots/
 ```

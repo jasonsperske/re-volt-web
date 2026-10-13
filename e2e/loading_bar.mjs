@@ -75,6 +75,9 @@ await page.waitForFunction(() => new Promise((resolve) => {
   };
   open.onerror = () => resolve(false);
 }), null, { timeout: 120000 });
+// The browser finishes writing a big save a moment after it's readable;
+// a reload inside that moment loses it.
+await page.waitForTimeout(1000);
 await page.reload();
 const cached = await waitForShop('cached');
 check(cached.some((l) => l.startsWith('Opening your saved disc')), 'cached: labelled as the saved disc');

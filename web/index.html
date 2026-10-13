@@ -35,7 +35,7 @@
     #credits dt { color: var(--muted); }
     #credits dd { margin: 0; }
     @media (max-width: 480px) { #credits dl { grid-template-columns: 1fr; gap: 2px; } #credits dd { margin-bottom: 8px; } }
-    .hidden { display: none !important; }
+    .hidden, .unsupported { display: none !important; }
     input[type=file] { display: none; }
     #hud { position: fixed; top: 12px; right: 12px; background: var(--panel); border-radius: 10px; padding: 10px 14px; font-variant-numeric: tabular-nums; text-align: right; line-height: 1.5; }
     #hud .big { font-size: 22px; font-weight: 700; color: var(--accent); }
@@ -76,12 +76,13 @@
     <input id="file" type="file" multiple accept=".cue,.bin,.iso,.img">
     <button id="menuButton" class="needs-disc hidden" title="Esc / gamepad Start">Menu</button>
     <button id="flip" class="needs-disc hidden" title="F / gamepad LB">Flip car</button>
-    <button id="camera" class="needs-disc hidden" title="C / gamepad Back">Camera</button>
+    <button id="vr" class="needs-disc hidden unsupported" title="Race in a VR headset">Enter VR</button>
+    <button id="camera" class="needs-disc hidden" title="Chase, far, low and free cameras (C / gamepad Back)">Camera</button>
     <button id="music" class="needs-disc hidden" title="M">Music: on</button>
     <button id="sound" class="needs-disc hidden" title="N">Sound: on</button>
     <div id="help" class="needs-disc hidden">
-      Drive: W/S or ↑/↓ throttle & brake, A/D or ←/→ steer · Space fire · F flip car · R restart · Esc menu · M music · N sound · C free camera (WASD fly, Q/E down/up, click to mouse-look)<br>
-      Gamepad: left stick steer · RT/A accelerate · LT/X brake & reverse · B/RB fire · right stick look · LB flip car · Y restart · Start menu · Back camera
+      Drive: W/S or ↑/↓ throttle & brake, A/D or ←/→ steer · Space fire · F flip car · R restart · Esc menu · M music · N sound · C camera: chase, far, low, free (WASD fly, Q/E down/up, click to mouse-look)<br>
+      Gamepad: left stick steer · RT/A accelerate · LT/X brake & reverse · B/RB fire · right stick look · LB flip car · Y restart · Start menu · Back changes camera
     </div>
   </div>
   <div id="hud" class="hidden"></div>

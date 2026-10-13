@@ -26,6 +26,8 @@ pub struct Input {
     pressed: HashSet<String>,
     mouse: (f32, f32),
     pad_prev: Vec<bool>,
+    /// VR controllers, merged into the next `take`.
+    pub xr: XrControls,
 }
 
 /// One frame of player intent.
@@ -50,6 +52,16 @@ pub struct Controls {
     /// Fire the held weapon (newly pressed).
     pub fire: bool,
     pub gamepad: Option<String>,
+}
+
+/// VR controller input for the next frame (see `App::set_xr_input`).
+#[derive(Clone, Copy, Default)]
+pub struct XrControls {
+    pub throttle: f32,
+    pub steer: f32,
+    pub fire: bool,
+    pub flip: bool,
+    pub camera: bool,
 }
 
 impl Input {
@@ -129,6 +141,12 @@ impl Input {
         } else {
             self.pad_prev.clear();
         }
+        let xr = std::mem::take(&mut self.xr);
+        c.throttle += xr.throttle;
+        c.steer += xr.steer;
+        c.fire |= xr.fire;
+        c.flip_car |= xr.flip;
+        c.toggle_camera |= xr.camera;
         c.throttle = c.throttle.clamp(-1.0, 1.0);
         c.steer = c.steer.clamp(-1.0, 1.0);
         c

@@ -21,7 +21,7 @@ web-sys = { version = "0.3", features = [
   "Window", "Document", "Navigator", "Performance", "console",
   "HtmlCanvasElement", "WebGl2RenderingContext", "WebGlBuffer", "WebGlProgram",
   "WebGlShader", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject",
-  "Gamepad", "GamepadButton",
+  "Gamepad", "GamepadButton", "WebGlFramebuffer",
 ] }
 
 [dev-dependencies]

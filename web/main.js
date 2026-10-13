@@ -3,6 +3,7 @@ import { CdMusic, findAudioTracks } from './music.js';
 import { SoundFx } from './sfx.js';
 import { Menu } from './menu.js';
 import { CREDITS } from './credits.js';
+import { XrMode } from './xr.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -656,12 +657,17 @@ async function start(files, fromCache = false) {
   loader.begin(fromCache);
   try {
     catalog = await openFiles(files);
+    // Saved for next visit in the background, as soon as the disc is known
+    // to be good: storing a fresh disc copies its tracks, which can take a
+    // moment, and needn't hold up the shop.
+    if (!fromCache) remember([...files]);
     if (!catalog.levels.some((l) => l.id === settings.level)) settings.level = catalog.levels[0].id;
     if (!catalog.cars.some((c) => c.id === settings.car)) settings.car = catalog.cars[0].id;
     // Into the toy shop: strings and font from the disc, then the main
     // menu while the last-used race loads in the background.
     loader.next('menus');
     for (const [id, t] of Object.entries(tunings)) await app.set_car_tuning(id, t);
+    app.set_camera_mode(Number(localStorageGet('camera') ?? 0));
     S = Array.from(await app.strings());
     await menu.loadFont(await app.read_image('GFX/FONT.BMP'));
     loader.next('shop');
@@ -680,9 +686,6 @@ async function start(files, fromCache = false) {
   } catch (e) {
     setMessage(String(e.message ?? e));
   }
-  // Saved for next visit once everything's loaded: storing a fresh disc
-  // copies all its tracks, which slows the disc reads above if it overlaps.
-  if (!fromCache) remember([...files]);
 }
 
 $('pick').onclick = () => $('file').click();
@@ -839,7 +842,13 @@ function updateHud(t) {
 // ---- Main loop ----------------------------------------------------------
 
 let lastStatus = 0;
+let lastCamera = null;
 function frame(t) {
+  // In VR the headset's own frame loop runs the game (xr.js).
+  if (xr.active) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const pressed = menu.poll(t);
   if (creditsOpen()) {
     if (pressed.has('b') || pressed.has('start')) hideCreditsSheet();
@@ -850,8 +859,49 @@ function frame(t) {
   updateHud(t);
   if (t - lastStatus > 250) {
     lastStatus = t;
+    // Remember the camera (C, Back, or the button) between visits.
+    const cam = app.camera_mode();
+    if (cam !== lastCamera) {
+      lastCamera = cam;
+      if (cam < 3) localStorageSet('camera', String(cam));
+    }
     status.textContent = message || app.status();
   }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// ---- VR -----------------------------------------------------------------
+// Races can be driven in a VR headset; menus stay on the flat screen, so
+// pausing, finishing or leaving the race ends the VR session.
+
+const xr = new XrMode(app, canvas, {
+  frame(t) {
+    menu.poll(t);
+    sfx.update(menu.open ? null : app.sound_state());
+    for (const s of app.take_sounds()) sfx.play(s.path, s.volume);
+    updateHud(t);
+    if (menu.open || app.frontend_shown() || app.race_state()?.finished != null) xr.end();
+  },
+  hud() {
+    const r = app.race_state();
+    if (!r) return { left: [], right: [], banner: '' };
+    const left = r.lap === null ? ['Free roam'] : [r.racers > 1 ? `${ordinal(r.position)} / ${r.racers}` : '', `LAP ${r.lap}/${r.laps}`].filter(Boolean);
+    const weapon = r.bomb != null ? `BOMB ${r.bomb > 0 ? r.bomb.toFixed(1) : '!!'}` : r.weapon ? `${r.weapon}${r.uses > 1 ? ` ×${r.uses}` : ''}` : '';
+    const right = [clock(r.time), weapon, r.zapped ? 'ZAPPED' : ''].filter(Boolean);
+    return { left, right, banner: banner.textContent, warn: banner.className === 'warn' };
+  },
+  pause() {
+    pause();
+  },
+});
+window.__xrMode = xr; // for e2e tests
+XrMode.supported().then((ok) => {
+  if (!ok) return;
+  $('vr').classList.remove('unsupported');
+  $('vr').onclick = (e) => {
+    e.target.blur();
+    if (menu.open || app.frontend_shown()) return;
+    xr.start().catch((err) => setMessage(`VR: ${err.message ?? err}`));
+  };
+});

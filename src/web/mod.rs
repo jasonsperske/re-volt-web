@@ -75,6 +75,48 @@ struct CarPart {
     offset: Vec3,
 }
 
+/// One eye of a WebXR frame: where it goes in the layer, and its matrices
+/// in metres (reference space).
+struct XrView {
+    viewport: [i32; 4],
+    proj: Mat4,
+    view: Mat4,
+}
+
+struct XrFrame {
+    framebuffer: Option<web_sys::WebGlFramebuffer>,
+    views: Vec<XrView>,
+}
+
+struct XrHud {
+    scene: gl::GpuScene,
+    texture: Rc<web_sys::WebGlTexture>,
+}
+
+/// Game units per metre in VR. The chase camera sits about a metre above
+/// the road, so the world feels the size it does to an RC car.
+const XR_UNITS_PER_METRE: f32 = 70.0;
+/// The HUD panel: size and placement in metres, ahead of and above the
+/// player's starting head position.
+const XR_HUD_SIZE: (f32, f32) = (1.0, 0.25);
+const XR_HUD_AT: Vec3 = Vec3::new(0.0, 0.32, -1.6);
+
+/// The VR player's reference space, in GL world space: at the chase
+/// camera, turned with it (yaw only, so the horizon stays level).
+fn xr_anchor(camera: &Camera) -> Mat4 {
+    Mat4::from_translation(camera.pos) * Mat4::from_rotation_y(-camera.yaw) * Mat4::from_scale(Vec3::splat(XR_UNITS_PER_METRE))
+}
+
+/// A flat textured rectangle facing +Z, `w` × `h`, centred on the origin.
+fn hud_quad(w: f32, h: f32) -> crate::scene::SceneBuilder {
+    use crate::scene::{BatchKey, Blend, GpuVertex};
+    let v = |x: f32, y: f32, u: f32, t: f32| GpuVertex { pos: [x * w / 2.0, y * h / 2.0, 0.0], uv: [u, t], color: [255; 4] };
+    let (tl, tr, bl, br) = (v(-1.0, 1.0, 0.0, 0.0), v(1.0, 1.0, 1.0, 0.0), v(-1.0, -1.0, 0.0, 1.0), v(1.0, -1.0, 1.0, 1.0));
+    let mut b = crate::scene::SceneBuilder::default();
+    b.batches.insert(BatchKey { texture: Some(0), blend: Blend::Opaque, double_sided: true }, vec![tl, bl, tr, tr, bl, br]);
+    b
+}
+
 /// Where to draw each copy of a car part this frame (the aerial's section
 /// model is drawn once per section).
 fn car_part_models(sim: &Car, part: &CarPart) -> Vec<Mat4> {
@@ -129,6 +171,10 @@ struct State {
     tunings: HashMap<String, crate::tuning::Tuning>,
     /// Whether the shop car is standing on the workbench.
     on_bench: bool,
+    /// Set by `frame_xr` for the frame being drawn: render to the headset.
+    xr_frame: Option<XrFrame>,
+    /// The race HUD panel shown in VR.
+    xr_hud: Option<XrHud>,
     race: Option<Race>,
     laps: u32,
     /// Menus are open: nothing moves and player input is ignored.
@@ -319,6 +365,8 @@ impl App {
             flip_requested: false,
             tunings: HashMap::new(),
             on_bench: false,
+            xr_frame: None,
+            xr_hud: None,
             race: None,
             laps: 3,
             paused: false,
@@ -424,6 +472,49 @@ impl App {
         })
     }
 
+    /// Advances and draws one WebXR frame: like `frame`, but rendered into
+    /// `framebuffer` (the session's layer) once per view. Each view is
+    /// `{x, y, w, h, proj, view}`: its viewport and its projection and view
+    /// matrices (Float32Array, metres).
+    pub fn frame_xr(&self, time_ms: f64, framebuffer: JsValue, views: Array) -> Result<(), JsValue> {
+        let num = |o: &JsValue, k: &str| Reflect::get(o, &k.into()).ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
+        let mat = |o: &JsValue, k: &str| -> Result<Mat4, JsValue> {
+            let m = js_sys::Float32Array::new(&Reflect::get(o, &k.into())?).to_vec();
+            if m.len() != 16 {
+                return Err("XR matrices must have 16 values".into());
+            }
+            Ok(Mat4::from_cols_slice(&m))
+        };
+        let mut list = Vec::new();
+        for v in views.iter() {
+            list.push(XrView { viewport: [num(&v, "x"), num(&v, "y"), num(&v, "w"), num(&v, "h")], proj: mat(&v, "proj")?, view: mat(&v, "view")? });
+        }
+        self.state.borrow_mut().xr_frame = Some(XrFrame { framebuffer: framebuffer.dyn_into().ok(), views: list });
+        self.frame(time_ms);
+        self.state.borrow_mut().xr_frame = None;
+        Ok(())
+    }
+
+    /// VR controller input for the next frame: throttle (−1 brake/reverse
+    /// to 1), steering (−1 left to 1 right), and actions pressed this frame.
+    pub fn set_xr_input(&self, throttle: f32, steer: f32, fire: bool, flip: bool, camera: bool) {
+        self.state.borrow_mut().input.xr = input::XrControls { throttle, steer, fire, flip, camera };
+    }
+
+    /// Updates the HUD panel shown in VR from a 2-D canvas (4:1).
+    pub fn set_xr_hud(&self, canvas: HtmlCanvasElement) -> Result<(), JsValue> {
+        let mut st = self.state.borrow_mut();
+        if let Some(hud) = &st.xr_hud {
+            st.renderer.canvas_texture(&canvas, Some(&hud.texture))?;
+            return Ok(());
+        }
+        let texture = Rc::new(st.renderer.canvas_texture(&canvas, None)?.ok_or("no HUD texture")?);
+        let textures = BTreeMap::from([(0i16, texture.clone())]);
+        let scene = st.renderer.upload_shared(&hud_quad(XR_HUD_SIZE.0, XR_HUD_SIZE.1), &textures)?;
+        st.xr_hud = Some(XrHud { scene, texture });
+        Ok(())
+    }
+
     /// Flips the player's car back onto its wheels (the on-screen button;
     /// F and gamepad LB do the same).
     pub fn flip_car(&self) {
@@ -435,13 +526,30 @@ impl App {
         self.state.borrow_mut().spawn();
     }
 
-    /// Switches between the chase camera and the free-fly camera.
+    /// Steps through the camera modes: chase (default, far, low), then the
+    /// free-fly camera.
     pub fn toggle_camera(&self) {
+        self.state.borrow_mut().camera.next_mode();
+    }
+
+    /// The current camera mode as a number (0–2 chase framings, 3 free),
+    /// for remembering between visits.
+    pub fn camera_mode(&self) -> u32 {
+        let cam = &self.state.borrow().camera;
+        match cam.mode {
+            CameraMode::Chase => crate::camera::ChaseView::ALL.iter().position(|v| *v == cam.view).unwrap_or(0) as u32,
+            CameraMode::Free => 3,
+        }
+    }
+
+    /// Restores a chase framing saved with `camera_mode` (the free camera
+    /// isn't restored).
+    pub fn set_camera_mode(&self, mode: u32) {
         let mut st = self.state.borrow_mut();
-        st.camera.mode = match st.camera.mode {
-            CameraMode::Chase => CameraMode::Free,
-            CameraMode::Free => CameraMode::Chase,
-        };
+        if let Some(view) = crate::camera::ChaseView::ALL.get(mode as usize) {
+            st.camera.mode = CameraMode::Chase;
+            st.camera.view = *view;
+        }
     }
 
     pub fn key(&self, code: &str, down: bool) {
@@ -492,7 +600,7 @@ impl App {
             return;
         }
         if controls.toggle_camera {
-            st.camera.mode = if st.camera.mode == CameraMode::Chase { CameraMode::Free } else { CameraMode::Chase };
+            st.camera.next_mode();
         }
         if controls.reset_car {
             st.spawn();
@@ -622,11 +730,7 @@ impl App {
             }
             None => (gl::Fog { color: [0.08, 0.09, 0.12], start: 1e9, end: 1e9 + 1.0 }, 50000.0),
         };
-        let aspect = st.renderer.resize();
-        let proj = Mat4::perspective_rh_gl(60f32.to_radians(), aspect, 5.0, far.max(1000.0));
-        let view_proj = proj * st.camera.view();
-
-        st.renderer.begin(&fog);
+        let xr = st.xr_frame.take();
         let mut scenes = Vec::new();
         if let Some(l) = &st.level {
             scenes.push((&l.gpu, Mat4::IDENTITY));
@@ -644,7 +748,31 @@ impl App {
                 }
             }
         }
-        st.renderer.draw(&scenes, view_proj, st.camera.pos, &fog);
+        if let Some(xr) = xr {
+            // Each eye: the headset's view in metres, applied to the world
+            // as seen from the player's anchor.
+            let anchor = xr_anchor(&st.camera);
+            let to_ref = anchor.inverse();
+            let no_fog = gl::Fog { color: [0.0; 3], start: 1e9, end: 1e9 + 1.0 };
+            let hud_model = anchor * Mat4::from_translation(XR_HUD_AT);
+            st.renderer.bind_framebuffer(xr.framebuffer.as_ref());
+            st.renderer.begin(&fog);
+            for v in &xr.views {
+                st.renderer.set_viewport(v.viewport);
+                let view_proj = v.proj * v.view * to_ref;
+                let eye = (anchor * v.view.inverse()).transform_point3(Vec3::ZERO);
+                st.renderer.draw(&scenes, view_proj, eye, &fog);
+                if let Some(hud) = &st.xr_hud {
+                    st.renderer.draw_on_top(&[(&hud.scene, hud_model)], view_proj, eye, &no_fog);
+                }
+            }
+            st.renderer.bind_framebuffer(None);
+            return;
+        }
+        let aspect = st.renderer.resize();
+        let proj = Mat4::perspective_rh_gl(60f32.to_radians(), aspect, 5.0, far.max(1000.0));
+        st.renderer.begin(&fog);
+        st.renderer.draw(&scenes, proj * st.camera.view(), st.camera.pos, &fog);
     }
 }
 
@@ -999,10 +1127,7 @@ impl App {
             parts.push(p.model.name.clone());
             parts.push(format!("{:.0} mph", p.sim.speed_mph()));
         }
-        parts.push(match st.camera.mode {
-            CameraMode::Chase => "Chase cam".into(),
-            CameraMode::Free => "Free cam".into(),
-        });
+        parts.push(st.camera.mode_name().into());
         parts.push(match &st.gamepad {
             Some(id) => format!("Gamepad: {id}"),
             None => "No gamepad (press a button to connect)".into(),
