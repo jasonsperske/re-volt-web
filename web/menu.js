@@ -4,7 +4,11 @@
 // on 16 px rows, panels sliding in from the left at 1500 px/s and out
 // downwards. Gamepad, keyboard and mouse.
 //
-// A screen is { title, items, back?, node?, y?, onShow? }. Items are either
+// A screen is { title, items, back?, node?, x?, y?, onShow?, corner?, onKey? }
+// (x, y place the panel; it's centred otherwise).
+// `corner` is { label, action }: a gear button in the bottom-right corner
+// (also G, or Y on a gamepad). `onKey(e)` sees keys first (return true to
+// take one), for screens that accept typing. Items are either
 //   { label, action }                                       — a button,
 //   { label, options: [{value, label}], value, onChange }   — a choice,
 //   { label, text }                                         — read-only info;
@@ -31,6 +35,7 @@ export class Menu {
     this.panel = { x: 0, y: 0, tx: 0, ty: 0, state: 'idle' };
     this.next = null;
     this.onNode = () => {};
+    this.cornerHover = false;
     canvas.addEventListener('click', (e) => this.click(e));
     canvas.addEventListener('mousemove', (e) => this.hover(e));
   }
@@ -78,7 +83,7 @@ export class Menu {
     this.screen = screen;
     this.index = Math.max(0, screen.items.findIndex((i) => !i.disabled && i.text === undefined));
     const { w, h } = this.size();
-    this.panel = { x: -w - 64, y: screen.y ?? Math.round((VH - h) / 2), tx: Math.round((VW - w) / 2), ty: screen.y ?? Math.round((VH - h) / 2), state: 'opening' };
+    this.panel = { x: -w - 64, y: screen.y ?? Math.round((VH - h) / 2), tx: screen.x ?? Math.round((VW - w) / 2), ty: screen.y ?? Math.round((VH - h) / 2), state: 'opening' };
     this.next = null;
     this.reportNode();
     screen.onShow?.();
@@ -159,6 +164,16 @@ export class Menu {
 
   key(e) {
     if (!this.open) return false;
+    const ready = this.panel.state === 'idle' || this.panel.state === 'opening';
+    if (ready && this.screen.onKey?.(e)) {
+      e.preventDefault();
+      return true;
+    }
+    if (e.code === 'KeyG' && this.screen.corner) {
+      e.preventDefault();
+      if (ready) this.activateCorner();
+      return true;
+    }
     const map = { ArrowUp: () => this.move(-1), ArrowDown: () => this.move(1), ArrowLeft: () => this.change(-1),
       ArrowRight: () => this.change(1), Enter: () => this.activate(), Space: () => this.activate(), Escape: () => this.back(),
       Backspace: () => this.back() };
@@ -198,7 +213,26 @@ export class Menu {
     return item.disabled || item.text !== undefined ? -1 : row;
   }
 
+  // The corner gear button, in virtual-screen coordinates.
+  cornerRect() {
+    return { x: 500, y: 396, w: 126, h: 30 };
+  }
+
+  inCorner(e) {
+    if (!this.screen?.corner) return false;
+    const { x, y } = this.toVirtual(e);
+    const r = this.cornerRect();
+    return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+  }
+
+  activateCorner() {
+    this.playSound('WAVS/MENUNEXT.WAV');
+    this.screen.corner.action();
+  }
+
   hover(e) {
+    this.cornerHover = this.inCorner(e);
+    this.canvas.style.cursor = this.cornerHover ? 'pointer' : '';
     const i = this.itemAt(e);
     if (i >= 0 && i !== this.index) {
       this.index = i;
@@ -207,6 +241,7 @@ export class Menu {
   }
 
   click(e) {
+    if (this.inCorner(e) && this.panel.state === 'idle') return this.activateCorner();
     const i = this.itemAt(e);
     if (i < 0) return;
     this.index = i;
@@ -276,7 +311,30 @@ export class Menu {
       const value = this.valueText(item);
       if (value) this.text(g, value, p.x + label * 8 + 32, y, 8, 12, item.text !== undefined ? COLORS.normal : color);
     });
+    if (s.corner) this.drawCorner(g, s.corner);
     this.text(g, 'v1.00', (78 - 5) * 8, 448, 8, 12, COLORS.normal);
+  }
+
+  drawCorner(g, corner) {
+    const r = this.cornerRect();
+    const color = this.cornerHover ? COLORS.selected : COLORS.normal;
+    g.fillStyle = 'rgba(8, 10, 24, 0.62)';
+    g.fillRect(r.x, r.y, r.w, r.h);
+    this.text(g, corner.label, r.x + 8, r.y + 9, 8, 12, color);
+    // Gear: 8 teeth around a hub with a hole.
+    const cx = r.x + r.w - 17;
+    const cy = r.y + r.h / 2;
+    g.beginPath();
+    for (let k = 0; k < 32; k++) {
+      const a = (k / 32) * Math.PI * 2;
+      const rad = k % 4 < 2 ? 11 : 8;
+      g.lineTo(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
+    }
+    g.closePath();
+    g.moveTo(cx + 3.5, cy);
+    g.arc(cx, cy, 3.5, 0, Math.PI * 2, true);
+    g.fillStyle = color;
+    g.fill('evenodd');
   }
 
   // Gamepad polling with key-repeat; returns newly pressed buttons.
@@ -291,7 +349,7 @@ export class Menu {
       const inputs = {
         up: button(12) || axis(1) < -0.6, down: button(13) || axis(1) > 0.6,
         left: button(14) || axis(0) < -0.6, right: button(15) || axis(0) > 0.6,
-        a: button(0), b: button(1), start: button(9),
+        a: button(0), b: button(1), y: button(3), start: button(9),
       };
       for (const [name, down] of Object.entries(inputs)) {
         const prev = this.held.get(name);
@@ -314,6 +372,7 @@ export class Menu {
       if (pressed.has('right')) this.change(1);
       if (pressed.has('a')) this.activate();
       if (pressed.has('b')) this.back();
+      if (pressed.has('y') && this.screen?.corner && this.panel.state === 'idle') this.activateCorner();
     }
     this.draw(dt);
     return pressed;

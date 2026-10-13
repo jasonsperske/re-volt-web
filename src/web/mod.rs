@@ -123,6 +123,12 @@ struct State {
     pickups_enabled: bool,
     /// Weapon sounds since JS last collected them: (path, volume 0..1).
     pending_sounds: Vec<(&'static str, f32)>,
+    /// Set by the on-screen Flip button; handled on the next frame.
+    flip_requested: bool,
+    /// Workbench changes per car id, applied whenever the car is built.
+    tunings: HashMap<String, crate::tuning::Tuning>,
+    /// Whether the shop car is standing on the workbench.
+    on_bench: bool,
     race: Option<Race>,
     laps: u32,
     /// Menus are open: nothing moves and player input is ignored.
@@ -256,7 +262,10 @@ async fn ensure_model(game: &GameData<JsSource>, state: &Rc<RefCell<State>>, id:
     if state.borrow().models.contains_key(id) {
         return Ok(());
     }
-    let car = game.load_car(id).await?;
+    let mut car = game.load_car(id).await?;
+    if let Some(t) = state.borrow().tunings.get(id) {
+        t.apply(&mut car.params);
+    }
     let (lo, hi) = car.body_bounds();
     let setup = CarSetup::new(&car.params, car.hull.as_ref(), lo, hi);
     let textures: BTreeMap<i16, _> = car.texture.as_ref().map(|t| (0, t.clone())).into_iter().collect();
@@ -307,6 +316,9 @@ impl App {
             weapons: None,
             pickups_enabled: true,
             pending_sounds: Vec::new(),
+            flip_requested: false,
+            tunings: HashMap::new(),
+            on_bench: false,
             race: None,
             laps: 3,
             paused: false,
@@ -412,6 +424,12 @@ impl App {
         })
     }
 
+    /// Flips the player's car back onto its wheels (the on-screen button;
+    /// F and gamepad LB do the same).
+    pub fn flip_car(&self) {
+        self.state.borrow_mut().flip_requested = true;
+    }
+
     /// Restarts the race from the grid.
     pub fn reset_car(&self) {
         self.state.borrow_mut().spawn();
@@ -479,10 +497,15 @@ impl App {
         if controls.reset_car {
             st.spawn();
         }
+        let held = st.race.as_ref().is_some_and(|r| r.countdown > 0.0);
+        if std::mem::take(&mut st.flip_requested) | controls.flip_car && !held {
+            if let Some(player) = st.racers.iter_mut().find(|r| r.ai.is_none()) {
+                player.sim.flip();
+            }
+        }
 
         // Simulate every racer. Nobody moves during the countdown; the player
         // only drives while the chase camera is active.
-        let held = st.race.as_ref().is_some_and(|r| r.countdown > 0.0);
         let player_input = match st.camera.mode {
             CameraMode::Chase if !held => DriveInput { throttle: controls.throttle, steer: controls.steer },
             _ => DriveInput::default(),
@@ -705,6 +728,68 @@ impl App {
 
     pub fn fe_camera_arrived(&self) -> bool {
         self.state.borrow().frontend.as_ref().is_none_or(|s| s.rig.arrived())
+    }
+
+    /// Stores workbench changes for a car (`null` for stock): an object
+    /// with an optional `name` and multipliers keyed as in
+    /// `tuning::KEYS`. A car that's already loaded is rebuilt, and the car
+    /// on the workbench takes the new setup where it stands.
+    pub fn set_car_tuning(&self, id: String, tuning: JsValue) -> Promise {
+        let (game, state) = (self.game.borrow().clone(), self.state.clone());
+        future_to_promise(async move {
+            let mut t = crate::tuning::Tuning::default();
+            if tuning.is_object() {
+                t.name = Reflect::get(&tuning, &"name".into())?.as_string();
+                for key in crate::tuning::KEYS {
+                    if let Some(v) = Reflect::get(&tuning, &key.into())?.as_f64() {
+                        t.set(key, v as f32);
+                    }
+                }
+            }
+            let loaded = {
+                let mut st = state.borrow_mut();
+                if t.is_stock() {
+                    st.tunings.remove(&id);
+                } else {
+                    st.tunings.insert(id.clone(), t);
+                }
+                st.models.remove(&id).is_some()
+            };
+            if let (true, Some(game)) = (loaded, game) {
+                ensure_model(&game, &state, &id).await?;
+                let mut st = state.borrow_mut();
+                let model = st.models.get(&id).cloned();
+                let is_player = st.player_car.as_deref() == Some(id.as_str());
+                if let (Some(model), true, Some((_, sim, shown))) = (model, is_player, &mut st.shop_car) {
+                    sim.setup = model.setup.clone();
+                    *shown = model;
+                }
+            }
+            Ok(JsValue::TRUE)
+        })
+    }
+
+    /// Puts the highlighted car on the workbench (the shop counter) and
+    /// moves the camera there, or clears the bench and goes back to the
+    /// car shelf.
+    pub fn fe_workbench(&self, on: bool) {
+        let mut guard = self.state.borrow_mut();
+        let st = &mut *guard;
+        st.on_bench = on;
+        st.shop_car = None;
+        let Some(shop) = &mut st.frontend else { return };
+        if !on {
+            shop.rig.go(crate::frontend::node::SELECT_CAR, crate::frontend::MOVE_TIME);
+            return;
+        }
+        shop.rig.go(crate::frontend::node::WORKBENCH, crate::frontend::MOVE_TIME);
+        let model = st.player_car.as_ref().and_then(|id| st.models.get(id)).cloned();
+        if let (Some(model), Some(car)) = (model, shop.selected_car) {
+            let rot = Quat::from_rotation_y(crate::frontend::BENCH_YAW);
+            let mut sim = Car::new(model.setup.clone(), Vec3::from(crate::frontend::BENCH_POS), rot);
+            sim.place_on_ground(&shop.world, Vec3::from(crate::frontend::BENCH_POS) - Vec3::Y * 40.0, rot);
+            st.shop_car = Some((car, sim, model));
+        }
     }
 
     /// Highlights a car on the shelf (its box slides out) and loads its

@@ -14,6 +14,7 @@ pub mod disc;
 pub mod formats;
 pub mod frontend;
 pub mod scene;
+pub mod tuning;
 pub mod weapons;
 
 #[cfg(target_arch = "wasm32")]

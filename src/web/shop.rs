@@ -9,7 +9,7 @@ use wasm_bindgen::JsValue;
 use super::gl::{GpuScene, Renderer};
 use super::JsSource;
 use crate::assets::GameData;
-use crate::collision::{level_world, CollisionWorld};
+use crate::collision::{floor_poly, level_world_with, CollisionWorld};
 use crate::formats::bmp::Image;
 use crate::formats::fob::LevelObject;
 use crate::formats::inf::LevelInfo;
@@ -155,7 +155,7 @@ impl Shop {
         }
         Ok(Shop {
             info: data.level.info.clone(),
-            world: level_world(&data.level),
+            world: level_world_with(&data.level, &counter_top(&data.level)),
             level,
             models,
             statics,
@@ -274,6 +274,25 @@ impl Shop {
 }
 
 /// CARBOX.M with its artwork polygon (flag 0x800) pointed at the car's cell.
+/// The service counter's top, which the shop's collision leaves out, so a
+/// car can stand on it as the workbench.
+fn counter_top(level: &crate::assets::LevelAssets) -> Vec<crate::formats::ncp::CollPoly> {
+    let [cx, cz] = crate::frontend::COUNTER_CENTER;
+    let mut out = Vec::new();
+    for m in &level.world.meshes {
+        for p in &m.mesh.polys {
+            let n = if p.flags & 1 != 0 { 4 } else { 3 };
+            let v: Vec<Vec3> = (0..n).map(|i| Vec3::from(m.mesh.verts[p.indices[i] as usize].pos)).collect();
+            let c = v.iter().copied().sum::<Vec3>() / n as f32;
+            let flat = v.iter().all(|q| (q.y - crate::frontend::COUNTER_TOP).abs() < 1.0);
+            if flat && (c.x - cx).hypot(c.z - cz) < crate::frontend::COUNTER_RADIUS {
+                out.push(floor_poly(&v));
+            }
+        }
+    }
+    out
+}
+
 fn box_mesh(carbox: &Mesh, car: i32) -> Mesh {
     let mut mesh = carbox.clone();
     let (page, [u0, v0], size) = box_art(car);

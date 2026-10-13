@@ -57,6 +57,8 @@ const raceTracks = () => catalog.levels.filter((l) => !ARENAS.has(l.id));
 const orderedCars = () => [...catalog.cars].sort((a, b) =>
   (CAR_ORDER.indexOf(a.id) + 1 || 99) - (CAR_ORDER.indexOf(b.id) + 1 || 99));
 const nameOf = (list, id) => list.find((e) => e.id === id)?.name ?? id;
+// A car's name, as renamed on the workbench.
+const carName = (id) => tunings[id]?.name || nameOf(catalog.cars, id);
 
 // What the chosen mode actually races with.
 function effective() {
@@ -97,7 +99,7 @@ async function applySettings() {
 // ---- Front-end menus (docs/frontend.md §2.2; camera nodes in brackets) ----
 
 const NODE = { MAIN: 1, SELECT_CAR: 2, CAR_CHOSEN: 3, SELECT_TRACK: 4, OPTIONS: 11, ENTER_NAME: 12, STUNT: 13, SELECT_RACE: 14,
-  GO: 16, SUMMARY: 17, RETURN: 18 };
+  GO: 16, SUMMARY: 17, RETURN: 18, WORKBENCH: 24 };
 const onOff = () => [{ value: true, label: str(63, 'On') }, { value: false, label: str(64, 'Off') }];
 const numbers = (list) => list.map((n) => ({ value: n, label: String(n) }));
 
@@ -249,7 +251,7 @@ function selectCar() {
   };
   const item = {
     label: str(277, 'Car'),
-    get value() { return nameOf(catalog.cars, settings.car); },
+    get value() { return carName(settings.car); },
     left: () => step(-1), right: () => step(1),
     select: async () => {
       if (choosing) return;
@@ -268,7 +270,131 @@ function selectCar() {
   return {
     title: str(3, 'Select Car'), node: NODE.SELECT_CAR, back: () => { app.fe_select_car(null); menu.show(enterName()); },
     onShow: () => { app.fe_choose_car(false); app.fe_select_car(settings.car); },
+    // Only while the box is out on the shelf: once a car is chosen it's on
+    // its way to the floor and the menu moves on.
+    get corner() {
+      if (choosing) return null;
+      return {
+        label: 'Workbench',
+        action: async () => {
+          choosing = true;
+          await app.fe_select_car(settings.car);
+          app.fe_workbench(true);
+          menu.show(workbench());
+        },
+      };
+    },
     items: [item],
+  };
+}
+
+// ---- Workbench ------------------------------------------------------------
+// New to this version: the chosen car stands on the shop counter, where it
+// can be renamed and tuned. Changes are multipliers of the stock values
+// (src/tuning.rs), saved per car in localStorage.
+
+const TUNING = [
+  ['mass', 'Weight'], ['stiffness', 'Spring Stiffness'], ['damping', 'Spring Damping'], ['travel', 'Suspension Travel'],
+  ['grip', 'Tyre Grip'], ['power', 'Engine Power'], ['top_speed', 'Top Speed'], ['steering', 'Steering Speed'],
+  ['downforce', 'Downforce'],
+];
+const PERCENTS = Array.from({ length: 16 }, (_, i) => (50 + i * 10) / 100).map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }));
+const tunings = loadTunings();
+
+function loadTunings() {
+  try {
+    const t = JSON.parse(localStorageGet('carTuning') ?? '{}');
+    return t && typeof t === 'object' ? t : {};
+  } catch { return {}; }
+}
+
+// Saves one car's tuning and rebuilds the car with it.
+async function saveTuning(id) {
+  const t = tunings[id];
+  if (t && !Object.keys(t).length) delete tunings[id];
+  localStorageSet('carTuning', JSON.stringify(tunings));
+  applied.car = null; // reload the player's car before the next race
+  await app.set_car_tuning(id, tunings[id] ?? null);
+}
+
+function workbench(selected = 0) {
+  const id = settings.car;
+  const t = () => (tunings[id] ??= {});
+  const items = [
+    { label: 'Name', get value() { return carName(id); }, action: () => menu.show(renameCar()) },
+    ...TUNING.map(([key, label]) => ({
+      label, options: PERCENTS,
+      value: tunings[id]?.[key] ?? 1,
+      onChange: (v) => {
+        if (v === 1) delete t()[key];
+        else t()[key] = v;
+        saveTuning(id);
+      },
+    })),
+    { label: '', text: '' },
+    {
+      label: 'Reset to Stock',
+      get disabled() { return !tunings[id]; },
+      action: () => {
+        delete tunings[id];
+        saveTuning(id);
+        menu.show(workbench(menu.index));
+      },
+    },
+    { label: 'Done', action: () => leave() },
+  ];
+  const leave = () => { app.fe_workbench(false); menu.show(selectCar()); };
+  return {
+    title: 'Workbench', node: NODE.WORKBENCH, x: 48, y: 128, back: leave, items,
+    onShow: () => { if (selected) menu.index = selected; },
+  };
+}
+
+// Renaming: type, or turn through the letters with left/right and pick one
+// with Enter/A (like the name wheel).
+const NAME_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', ' ', '-', '!', 'DEL', 'END'];
+const CAR_NAME_MAX = 16;
+function renameCar() {
+  const id = settings.car;
+  let draft = carName(id);
+  let letter = NAME_LETTERS.length - 1;
+  const done = () => {
+    const name = draft.trim();
+    if (name && name !== nameOf(catalog.cars, id)) (tunings[id] ??= {}).name = name;
+    else if (tunings[id]) delete tunings[id].name;
+    saveTuning(id);
+    menu.show(workbench());
+  };
+  const add = (c) => { if (draft.length < CAR_NAME_MAX) draft += c; };
+  const item = {
+    get label() { return `${draft}${NAME_LETTERS[letter].length > 1 ? ` [${NAME_LETTERS[letter]}]` : `${NAME_LETTERS[letter]}_`}`; },
+    left: () => { letter = (letter + NAME_LETTERS.length - 1) % NAME_LETTERS.length; },
+    right: () => { letter = (letter + 1) % NAME_LETTERS.length; },
+    select: () => {
+      const c = NAME_LETTERS[letter];
+      if (c === 'END') return done();
+      if (c === 'DEL') draft = draft.slice(0, -1);
+      else add(c);
+      sfx.play('WAVS/MENUUPDOWN.WAV', 0.6);
+    },
+  };
+  return {
+    title: 'Rename Car', node: NODE.WORKBENCH, x: 48, y: 160,
+    back: () => menu.show(workbench()),
+    items: [
+      item,
+      { label: 'Type, or turn letters', text: '' },
+      { label: 'Original Name', action: () => { draft = nameOf(catalog.cars, id); } },
+      { label: 'Done', action: done },
+    ],
+    // Typing goes to the name while its row is highlighted.
+    onKey: (e) => {
+      if (menu.index !== 0) return false;
+      if (e.key === 'Enter') { done(); return true; }
+      if (e.key === 'Backspace') { draft = draft.slice(0, -1); return true; }
+      if (e.key.length === 1 && /[A-Za-z0-9 !\-.']/.test(e.key) && !e.ctrlKey && !e.metaKey) { add(e.key); return true; }
+      return false;
+    },
   };
 }
 
@@ -295,7 +421,7 @@ function summary() {
   const info = [
     { label: 'Mode', text: modes[settings.mode] },
     { label: str(460, 'Track'), text: nameOf(catalog.levels, want.level) },
-    { label: str(277, 'Car'), text: nameOf(catalog.cars, want.car) },
+    { label: str(277, 'Car'), text: carName(want.car) },
   ];
   if (settings.mode !== 'stunt') info.push({ label: str(35, 'Laps'), text: String(want.laps) });
   if (settings.mode === 'single') info.push({ label: 'Opponents', text: String(want.opponents) },
@@ -535,6 +661,7 @@ async function start(files, fromCache = false) {
     // Into the toy shop: strings and font from the disc, then the main
     // menu while the last-used race loads in the background.
     loader.next('menus');
+    for (const [id, t] of Object.entries(tunings)) await app.set_car_tuning(id, t);
     S = Array.from(await app.strings());
     await menu.loadFont(await app.read_image('GFX/FONT.BMP'));
     loader.next('shop');
@@ -562,6 +689,7 @@ $('pick').onclick = () => $('file').click();
 $('file').onchange = (e) => e.target.files.length && start(e.target.files);
 $('menuButton').onclick = (e) => { pause(); e.target.blur(); };
 $('camera').onclick = (e) => { app.toggle_camera(); e.target.blur(); };
+$('flip').onclick = (e) => { app.flip_car(); e.target.blur(); };
 function toggleMusic() {
   music.setEnabled(!music.enabled);
   localStorageSet('music', music.enabled ? 'on' : 'off');
@@ -623,7 +751,7 @@ if (saved?.length) start(saved, true);
 
 // ---- Input --------------------------------------------------------------
 
-const VIEW_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyC', 'Space', 'ShiftLeft', 'ShiftRight',
+const VIEW_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyC', 'Space', 'ShiftLeft', 'ShiftRight',
   'ControlLeft', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 addEventListener('keydown', (e) => {
   if (creditsOpen()) {

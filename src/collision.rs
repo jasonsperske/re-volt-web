@@ -201,9 +201,42 @@ impl CollisionWorld {
     }
 }
 
+/// A solid, upward-facing collision polygon from a convex outline (used for
+/// surfaces the level's `.ncp` leaves out).
+pub fn floor_poly(verts: &[Vec3]) -> CollPoly {
+    let mut n = (verts[1] - verts[0]).cross(verts[2] - verts[0]).normalize_or(Vec3::NEG_Y);
+    if n.y > 0.0 {
+        n = -n; // up is -Y
+    }
+    let center = verts.iter().copied().sum::<Vec3>() / verts.len() as f32;
+    let mut edges = [[0.0; 4]; 4];
+    for (i, edge) in edges.iter_mut().enumerate().take(verts.len().min(4)) {
+        let (a, b) = (verts[i], verts[(i + 1) % verts.len()]);
+        let mut e = (b - a).cross(n).normalize_or_zero();
+        let mut d = -e.dot(a);
+        if e.dot(center) + d > 0.0 {
+            (e, d) = (-e, -d);
+        }
+        *edge = [e.x, e.y, e.z, d];
+    }
+    let (lo, hi) = verts.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    CollPoly {
+        flags: if verts.len() == 4 { 1 } else { 0 },
+        material: 0,
+        plane: [n.x, n.y, n.z, -n.dot(verts[0])],
+        edges,
+        bbox: [lo.x, hi.x, lo.y, hi.y, lo.z, hi.z],
+    }
+}
+
 /// Collision for a loaded level: the track plus every placed prop that ships
 /// a collision mesh.
 pub fn level_world(level: &crate::assets::LevelAssets) -> CollisionWorld {
+    level_world_with(level, &[])
+}
+
+/// [`level_world`] plus extra polygons.
+pub fn level_world_with(level: &crate::assets::LevelAssets, extra: &[CollPoly]) -> CollisionWorld {
     let instances: Vec<(&[CollPoly], Mat3, Vec3)> = level
         .instances
         .iter()
@@ -212,5 +245,6 @@ pub fn level_world(level: &crate::assets::LevelAssets) -> CollisionWorld {
             Some((polys.as_slice(), crate::scene::instance_rotation(&inst.rot), Vec3::from(inst.pos)))
         })
         .collect();
-    CollisionWorld::new(&level.collision, &instances)
+    let polys: Vec<CollPoly> = level.collision.iter().chain(extra).cloned().collect();
+    CollisionWorld::new(&polys, &instances)
 }

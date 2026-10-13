@@ -297,6 +297,10 @@ pub struct Car {
     aerial: Option<Aerial>,
     /// Spinner angle (radians), advanced per rendered frame.
     spin_angle: f32,
+    /// Seconds since the body last touched the world.
+    body_touch_age: f32,
+    /// Target pose while the car is being flipped upright.
+    flipping: Option<(Vec3, Quat)>,
 }
 
 impl Car {
@@ -330,6 +334,8 @@ impl Car {
             down_force_override: None,
             aerial: None,
             spin_angle: 0.0,
+            body_touch_age: f32::MAX,
+            flipping: None,
         };
         car.aerial = car.setup.parts.aerial.as_ref().map(|a| Aerial::new(a, pos, rot));
         car.place(pos, rot);
@@ -347,6 +353,7 @@ impl Car {
         self.dvel = Vec3::ZERO;
         self.steer = 0.0;
         self.throttle = 0.0;
+        self.flipping = None;
         self.update_inertia();
         for n in 0..4 {
             self.wheels[n] = WheelState { flags: self.setup.wheels[n].flags, oil_timer: OIL_RECOVERY, ..Default::default() };
@@ -568,8 +575,55 @@ impl Car {
         (self.prev_wheel_centers[n].lerp(center, t), rot * Quat::from_rotation_y(w.steer_angle) * Quat::from_rotation_x(w.spin))
     }
 
+    /// Flip Car (control handler 0x41e750): when the car is well over on
+    /// its side or roof and touching something, lift it and turn it upright
+    /// over the next half second or so. Returns whether a flip started.
+    pub fn flip(&mut self) -> bool {
+        let down = self.rot * UP;
+        let touching = self.wheels.iter().any(|w| w.contact) || self.body_touch_age < 0.1;
+        if self.flipping.is_some() || down.y > 0.3 || !touching {
+            return false;
+        }
+        // Upright with the same heading, 50 units up (0x469cb0).
+        let fwd = self.rot * Vec3::Z;
+        let f = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::X);
+        let target = Quat::from_mat3(&Mat3::from_cols(Vec3::new(f.z, 0.0, -f.x), Vec3::Y, f)).normalize();
+        self.flipping = Some((self.pos - UP * 50.0, target));
+        true
+    }
+
+    pub fn is_flipping(&self) -> bool {
+        self.flipping.is_some()
+    }
+
+    /// One step of the flip move handler (0x469cb0), used instead of the
+    /// normal physics until the car is upright.
+    fn flip_step(&mut self, target_pos: Vec3, target_rot: Quat) {
+        self.vel = Vec3::ZERO;
+        self.ang_vel = Vec3::ZERO;
+        self.impulse = Vec3::ZERO;
+        self.ang_impulse = Vec3::ZERO;
+        self.pos += (target_pos - self.pos) * (10.0 * DT);
+        self.rot = self.rot.slerp(target_rot, 8.0 * DT).normalize();
+        self.update_inertia();
+        for n in 0..4 {
+            self.place_wheel(n);
+        }
+        if self.rot.dot(target_rot).abs() > 0.9999 {
+            self.flipping = None;
+        }
+    }
+
     fn step(&mut self, world: &CollisionWorld, input: DriveInput) {
         self.save_prev_pose();
+        self.body_touch_age = (self.body_touch_age + DT).min(1e6);
+        if let Some((pos, rot)) = self.flipping {
+            self.flip_step(pos, rot);
+            if let (Some(aerial), Some(setup)) = (&mut self.aerial, &self.setup.parts.aerial) {
+                aerial.step(setup, self.pos, self.rot, self.vel, DT);
+            }
+            return;
+        }
         self.control(input);
         // car_move_handler 0x469720
         self.update_body();
@@ -960,6 +1014,7 @@ impl Car {
         if contacts.is_empty() {
             return;
         }
+        self.body_touch_age = 0.0;
 
         // body_contact_pushout 0x40cd90 (merging overlapping contacts by
         // pushing only as far as each normal still needs).

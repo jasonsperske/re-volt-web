@@ -40,7 +40,9 @@ image, in the browser. No game data is included, and nothing is uploaded.
 4. **Enter Name:** left/right turns the letter wheel, and Enter (or A) picks a
    letter. Turn to **END** and press Enter when you're done.
 5. **Select Car:** left/right takes boxes off the shelf. Enter (or A) picks
-   one, and the car drops out of its box.
+   one, and the car drops out of its box. The **Workbench** gear in the
+   corner (G, or Y on a gamepad) puts the car on the shop counter instead,
+   to rename and tune it (see below).
 6. **Select Track:** left/right changes the track on the big screen, and Enter
    confirms it.
 7. **Summary:** check your choices and select **Start Race**. Wait for the
@@ -51,6 +53,14 @@ music and sound effects on or off. **View Credits** shows the original game's
 credits, page by page; they're also on the start screen, under **Credits**. The browser remembers your disc, so next
 time the game opens straight into the shop.
 
+### The workbench
+
+On the workbench you can rename a car and change its weight, spring
+stiffness and damping, suspension travel, tyre grip, engine power, top
+speed, steering speed and downforce, each from 50% to 200% of stock.
+Changes are saved in your browser for each car and used in every race with
+it. **Reset to Stock** puts a car back the way it came.
+
 ### Controls
 
 | | Keyboard | Gamepad |
@@ -60,6 +70,7 @@ time the game opens straight into the shop.
 | Steer | A / D or ← / → | Left stick |
 | Fire weapon | Space | B or RB |
 | Look around | Mouse (click the view first) | Right stick |
+| Flip car back onto its wheels | F (or the **Flip car** button) | LB |
 | Restart race | R | Y |
 | Pause menu | Esc | Start |
 | Free camera on/off | C | Back |
@@ -75,7 +86,8 @@ A to select, and Esc or B to go back. The mouse works too.
   another weapon until you've used the one you have.
 - **Last place gets the better weapons:** shockwaves, ball bearings and the
   occasional Global Pulse.
-- **If you flip over**, press R (or Y) to restart, or open the pause menu.
+- **If you flip over**, press F (LB on a gamepad, or the **Flip car** button)
+  to turn the car back onto its wheels where it is. R (or Y) restarts the race.
 
 ### Troubleshooting
 
@@ -122,6 +134,7 @@ npm test             # native: every track and car, physics, AI laps, weapons
 npm install && npm run e2e    # headless Chrome; needs `npm run serve` running
 npm run e2e:loading  # the loading bar, from a fresh pick and from the browser cache
 npm run e2e:credits  # the credits, on the start screen and in the toy shop
+npm run e2e:workbench  # renaming and tuning a car on the workbench
 npm run tour         # screenshots every menu screen into e2e/shots/
 npm run screenshots  # retakes the README screenshots in docs/screenshots/
 ```

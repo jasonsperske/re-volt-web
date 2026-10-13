@@ -6,8 +6,9 @@
 
 use glam::{Mat3, Quat, Vec3};
 
-/// Camera nodes `{position, look target}` (§1.1, table at 0x4c4b78).
-pub const NODES: [([f32; 3], [f32; 3]); 24] = [
+/// Camera nodes `{position, look target}` (§1.1, table at 0x4c4b78), plus
+/// node 24, the workbench, which is new to this version.
+pub const NODES: [([f32; 3], [f32; 3]); 25] = [
     ([76.5, -79.3, -4462.6], [109.5, -155.3, -3466.1]),
     ([93.5, -102.9, -1926.7], [110.9, -296.6, -945.7]),
     ([863.5, -1092.5, 512.5], [1491.2, -561.9, 1082.2]),
@@ -32,7 +33,19 @@ pub const NODES: [([f32; 3], [f32; 3]); 24] = [
     ([-1676.0, -534.9, 1268.1], [-1950.7, -21.6, 2081.1]),
     ([-1052.3, -437.1, 1770.1], [-1926.2, -44.5, 2056.7]),
     ([-1047.1, -746.2, 1165.8], [-1692.1, 0.0, 1835.1]),
+    // Workbench: outside the service counter, looking down at the bench spot.
+    ([517.0, -383.0, 297.0], [432.0, -298.0, 134.0]),
 ];
+
+/// The service counter that serves as the workbench (from the shop mesh:
+/// an octagonal ring top at y −273 around this centre).
+pub const COUNTER_CENTER: [f32; 2] = [81.0, -69.0];
+pub const COUNTER_TOP: f32 = -273.0;
+pub const COUNTER_RADIUS: f32 = 600.0;
+/// Where a car sits on the bench, and its heading (radians about Y): along
+/// the counter, 40° round from its +X side.
+pub const BENCH_POS: [f32; 3] = [387.0, -273.0, 188.0];
+pub const BENCH_YAW: f32 = -0.70;
 
 /// Named nodes for the menus this version has (§2.2).
 pub mod node {
@@ -47,6 +60,7 @@ pub mod node {
     pub const SELECT_RACE: usize = 14;
     pub const GO: usize = 16;
     pub const SUMMARY: usize = 17;
+    pub const WORKBENCH: usize = 24;
 }
 
 /// Default transition time; the race-start move is 0.25 s (§1.3).

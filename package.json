@@ -9,6 +9,7 @@
     "e2e": "node e2e/smoke.mjs",
     "e2e:loading": "node e2e/loading_bar.mjs",
     "e2e:credits": "node e2e/credits.mjs",
+    "e2e:workbench": "node e2e/workbench.mjs",
     "tour": "node e2e/frontend_tour.mjs",
     "screenshots": "node e2e/readme_shots.mjs"
   },

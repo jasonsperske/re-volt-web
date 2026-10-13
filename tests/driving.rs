@@ -125,3 +125,74 @@ fn oil_lengthens_braking() {
     println!("braking distance over 0.5 s: dry {dry:.0}, oil {oily:.0}");
     assert!(oily > dry * 1.1, "oil should reduce braking grip (dry {dry}, oil {oily})");
 }
+
+#[test]
+fn flip_car_rights_a_car_on_its_roof_without_moving_it_far() {
+    let Some(game) = common::open_game() else { return };
+    let (mut car, world) = spawn(&game, "NHOOD1", "RC");
+    run(&mut car, &world, DriveInput::default(), 1.0);
+    let heading = car.forward();
+
+    // Upside down on the road, left to settle on its roof.
+    let roof = Quat::from_axis_angle(heading, std::f32::consts::PI) * car.rot;
+    car.place(car.pos - Vec3::Y * 30.0, roof);
+    run(&mut car, &world, DriveInput::default(), 1.5);
+    assert!(!car.is_upright(), "should be lying on its roof");
+    let lying = car.pos;
+
+    assert!(car.flip(), "Flip Car should start on the roof");
+    assert!(!car.flip(), "a second press while flipping does nothing");
+    let mut t = 0.0;
+    while car.is_flipping() && t < 3.0 {
+        run(&mut car, &world, DriveInput::default(), 1.0 / 60.0);
+        t += 1.0 / 60.0;
+    }
+    println!("flipped in {t:.2} s");
+    assert!(!car.is_flipping() && t < 1.0, "flip took {t} s");
+    run(&mut car, &world, DriveInput::default(), 1.5);
+    let moved = Vec3::new(car.pos.x - lying.x, 0.0, car.pos.z - lying.z).length();
+    println!("after landing: upright {}, wheels down {}, moved {moved:.1}", car.is_upright(), car.wheels.iter().all(|w| w.contact));
+    assert!(car.is_upright());
+    assert!(car.wheels.iter().all(|w| w.contact));
+    assert!(car.forward().dot(heading) > 0.95, "keeps its heading");
+    assert!(moved < 40.0, "should land where it was, moved {moved}");
+
+    // Already on its wheels: nothing to flip.
+    assert!(!car.flip());
+}
+
+#[test]
+fn workbench_tuning_changes_how_the_car_drives() {
+    let Some(game) = common::open_game() else { return };
+    let level = pollster::block_on(game.load_level("NHOOD1")).unwrap();
+    let world = level_world(&level);
+    let rot = Quat::from_rotation_y(level.info.start_rot * std::f32::consts::TAU);
+    let build = |tuning: &revolt_web::tuning::Tuning| {
+        let mut car = pollster::block_on(game.load_car("RC")).unwrap();
+        tuning.apply(&mut car.params);
+        let (lo, hi) = car.body_bounds();
+        let mut sim = Car::new(CarSetup::new(&car.params, car.hull.as_ref(), lo, hi), Vec3::ZERO, Quat::IDENTITY);
+        sim.place_on_ground(&world, Vec3::from(level.info.start_pos), rot);
+        run(&mut sim, &world, DriveInput::default(), 2.0);
+        sim
+    };
+    let ride = |car: &Car| world.raycast(car.pos, Vec3::Y, 200.0, NCP_OBJECTS_IGNORE).unwrap().t;
+    let speed_after = |mut car: Car| {
+        run(&mut car, &world, DriveInput { throttle: 1.0, steer: 0.0 }, 3.0);
+        car.speed_mph()
+    };
+
+    let stock = build(&Default::default());
+    let mut soft = revolt_web::tuning::Tuning::default();
+    soft.set("stiffness", 0.5);
+    soft.set("mass", 1.5);
+    let soft = build(&soft);
+    println!("ride height: stock {:.1}, soft and heavy {:.1}", ride(&stock), ride(&soft));
+    assert!(ride(&soft) < ride(&stock) - 1.0, "softer springs and more weight should sit lower");
+
+    let mut slow = revolt_web::tuning::Tuning::default();
+    slow.set("top_speed", 0.5);
+    let (fast_mph, slow_mph) = (speed_after(build(&Default::default())), speed_after(build(&slow)));
+    println!("speed after 3 s: stock {fast_mph:.1} mph, half top speed {slow_mph:.1} mph");
+    assert!(slow_mph < fast_mph * 0.75);
+}

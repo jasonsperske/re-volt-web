@@ -12,6 +12,7 @@ const PAD_A: usize = 0;
 const PAD_B: usize = 1;
 const PAD_X: usize = 2;
 const PAD_Y: usize = 3;
+const PAD_LB: usize = 4;
 const PAD_LT: usize = 6;
 const PAD_RT: usize = 7;
 const PAD_RB: usize = 5;
@@ -43,6 +44,8 @@ pub struct Controls {
     pub pitch: f32,
     // One-shot actions
     pub reset_car: bool,
+    /// Turn the car back onto its wheels (newly pressed).
+    pub flip_car: bool,
     pub toggle_camera: bool,
     /// Fire the held weapon (newly pressed).
     pub fire: bool,
@@ -84,6 +87,7 @@ impl Input {
             yaw: (k("ArrowRight") - k("ArrowLeft")) * 2.0 * dt + self.mouse.0 * 0.003,
             pitch: -self.mouse.1 * 0.003,
             reset_car: self.pressed.contains("KeyR"),
+            flip_car: self.pressed.contains("KeyF"),
             toggle_camera: self.pressed.contains("KeyC"),
             fire: self.pressed.contains("Space") || self.pressed.contains("Enter"),
             gamepad: None,
@@ -117,6 +121,7 @@ impl Input {
             c.yaw += axis(2) * 2.5 * dt;
             c.pitch += -axis(3) * 2.0 * dt;
             c.reset_car |= just(PAD_Y);
+            c.flip_car |= just(PAD_LB);
             c.toggle_camera |= just(PAD_BACK);
             c.fire |= just(PAD_B) || just(PAD_RB);
             c.gamepad = Some(pad.id());
