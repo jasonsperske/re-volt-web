@@ -1,0 +1,21 @@
+{
+  "name": "re-volt",
+  "version": "1.0.0",
+  "description": "Re-Volt in the browser (Rust/WASM + WebGL2), loading your own PC disc",
+  "scripts": {
+    "build": "./build.sh",
+    "serve": "python3 -m http.server 8080 -d web",
+    "test": "cargo test --release",
+    "e2e": "node e2e/smoke.mjs",
+    "e2e:loading": "node e2e/loading_bar.mjs",
+    "e2e:credits": "node e2e/credits.mjs",
+    "tour": "node e2e/frontend_tour.mjs",
+    "screenshots": "node e2e/readme_shots.mjs"
+  },
+  "author": "",
+  "license": "ISC",
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "^1.49.1"
+  }
+}

@@ -1,0 +1,49 @@
+# Game data is user-supplied and must never be committed or deployed.
+
+# Disc images (any letter case)
+*.[bB][iI][nN]
+*.[cC][uU][eE]
+*.[iI][sS][oO]
+*.[iI][mM][gG]
+*.[cC][hH][dD]
+*.[cC][cC][dD]
+*.[sS][uU][bB]
+*.[mM][dD][fF]
+*.[mM][dD][sS]
+*.[nN][rR][gG]
+*.[tT][oO][cC]
+
+# Files extracted from the game: executables, installers, textures, sounds,
+# models, levels and text. Nothing in this project uses these file types.
+*.[eE][xX][eE]
+*.[dD][lL][lL]
+*.[cC][aA][bB]
+*.[bB][mM][pP]
+*.[bB][mM][qQ]
+*.[wW][aA][vV]
+*.[pP][rR][mM]
+*.[hH][uU][lL]
+*.[nN][cC][pP]
+*.[fF][iI][nN]
+*.[fF][oO][bB]
+*.[iI][nN][fF]
+*.[tT][aA][zZ]
+*.[pP][aA][nN]
+*.[fF][aA][nN]
+*.[rR][pP][lL]
+*.[wW]
+*.[mM]
+/[Ss][Tt][Rr][Ii][Nn][Gg][Ss]/
+[Ee][Nn][Gg][Ll][Ii][Ss][Hh].[Tt][Xx][Tt]
+
+# Reverse-engineering notes derived from REVOLT.EXE: kept private.
+/docs/physics.md
+/docs/weapons.md
+/docs/frontend.md
+
+# Build output, tools and analysis scratch
+/target
+/web/pkg
+node_modules
+/e2e/shots
+/.rea

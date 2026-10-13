@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Re-Volt Web</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; --bg: #0d0f14; --panel: rgba(16, 19, 27, 0.88); --text: #e6e8ee; --muted: #9aa3b5; --accent: #f2b233; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    #panel { position: fixed; top: 12px; left: 12px; right: 12px; max-width: 560px; background: var(--panel); border-radius: 10px; padding: 12px 14px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+    #panel label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+    select, button { font: inherit; background: #222838; color: var(--text); border: 1px solid #343c52; border-radius: 6px; padding: 5px 8px; }
+    button.primary { background: var(--accent); color: #1a1406; border-color: transparent; font-weight: 600; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #status { position: fixed; left: 12px; right: 12px; bottom: 12px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
+    #help { width: 100%; color: var(--muted); font-size: 12px; }
+    #drop { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; pointer-events: none; }
+    #drop > div { width: min(460px, 100%); color: var(--muted); }
+    #loading { margin-top: 18px; }
+    #loading .track { height: 8px; border-radius: 4px; background: #222838; overflow: hidden; }
+    #loadingFill { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 0.2s ease-out; }
+    #loadingLabel { margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+    #drop h1 { color: var(--text); font-size: 22px; margin: 0 0 8px; }
+    button.link { pointer-events: auto; margin-top: 12px; background: none; border: none; padding: 4px 6px; color: var(--accent); text-decoration: underline; cursor: pointer; }
+    #credits { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.6); }
+    #credits .sheet { width: min(560px, 100%); max-height: 100%; overflow-y: auto; background: #10131b; border: 1px solid #343c52; border-radius: 10px; padding: 0 20px 20px; }
+    #credits header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 0 10px; background: #10131b; }
+    #credits h2 { margin: 0; font-size: 18px; }
+    #credits .note { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
+    #credits h3 { margin: 22px 0 8px; color: var(--accent); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+    #credits dl { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 6px 16px; margin: 0; }
+    #credits dt { color: var(--muted); }
+    #credits dd { margin: 0; }
+    @media (max-width: 480px) { #credits dl { grid-template-columns: 1fr; gap: 2px; } #credits dd { margin-bottom: 8px; } }
+    .hidden { display: none !important; }
+    input[type=file] { display: none; }
+    #hud { position: fixed; top: 12px; right: 12px; background: var(--panel); border-radius: 10px; padding: 10px 14px; font-variant-numeric: tabular-nums; text-align: right; line-height: 1.5; }
+    #hud .big { font-size: 22px; font-weight: 700; color: var(--accent); }
+    #hud .weapon { margin-top: 6px; font-weight: 700; color: #7fd4ff; }
+    #hud .weapon.rolling { color: var(--muted); }
+    #hud .weapon.bomb { color: #ff5a4a; }
+    #banner { position: fixed; left: 0; right: 0; top: 30%; text-align: center; font-size: clamp(40px, 12vw, 120px); font-weight: 800; color: var(--accent); text-shadow: 0 4px 16px #000; pointer-events: none; }
+    #banner.warn { color: #ff5a4a; font-size: clamp(28px, 7vw, 64px); }
+    #banner.done { font-size: clamp(28px, 7vw, 64px); }
+    #menu { position: fixed; inset: 0; width: 100%; height: 100%; }
+    /* The shop shows nothing but the scene and its menus, like the original. */
+    body.in-shop #panel, body.in-shop #status, body.in-shop #hud, body.in-shop #banner { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="view" tabindex="0"></canvas>
+  <div id="drop">
+    <div>
+      <h1>Re-Volt Web</h1>
+      <p id="intro">Choose or drop your own Re-Volt PC disc image: the <code>.cue</code> with its <code>.bin</code> tracks, or an <code>.iso</code>.
+      Files are read in your browser and never uploaded.<br>
+      <button id="creditsButton" class="link">Credits</button></p>
+      <div id="loading" class="hidden" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="track"><div id="loadingFill"></div></div>
+        <div id="loadingLabel"></div>
+      </div>
+    </div>
+  </div>
+  <div id="credits" class="hidden" role="dialog" aria-modal="true" aria-labelledby="creditsTitle">
+    <div class="sheet">
+      <header><h2 id="creditsTitle">Re-Volt credits</h2><button id="creditsClose">Close</button></header>
+      <p class="note">The original game's credits, as they appear in it.</p>
+      <div id="creditsBody"></div>
+    </div>
+  </div>
+  <div id="panel">
+    <button id="pick" class="primary">Open disc…</button>
+    <input id="file" type="file" multiple accept=".cue,.bin,.iso,.img">
+    <button id="menuButton" class="needs-disc hidden" title="Esc / gamepad Start">Menu</button>
+    <button id="camera" class="needs-disc hidden" title="C / gamepad Back">Camera</button>
+    <button id="music" class="needs-disc hidden" title="M">Music: on</button>
+    <button id="sound" class="needs-disc hidden" title="N">Sound: on</button>
+    <div id="help" class="needs-disc hidden">
+      Drive: W/S or ↑/↓ throttle & brake, A/D or ←/→ steer · Space fire · R restart · Esc menu · M music · N sound · C free camera (WASD fly, Q/E down/up, click to mouse-look)<br>
+      Gamepad: left stick steer · RT/A accelerate · LT/X brake & reverse · B/RB fire · right stick look · Y restart · Start menu · Back camera
+    </div>
+  </div>
+  <div id="hud" class="hidden"></div>
+  <div id="banner"></div>
+  <canvas id="menu" class="hidden"></canvas>
+  <div id="status">Loading engine…</div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+[package]
+name = "revolt-web"
+version = "0.1.0"
+edition = "2021"
+description = "Browser (Rust/WASM) engine for Re-Volt that loads the user's own original game disc"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glam = "0.29"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Pinned to match the installed wasm-bindgen-cli
+wasm-bindgen = "=0.2.100"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+  "Window", "Document", "Navigator", "Performance", "console",
+  "HtmlCanvasElement", "WebGl2RenderingContext", "WebGlBuffer", "WebGlProgram",
+  "WebGlShader", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject",
+  "Gamepad", "GamepadButton",
+] }
+
+[dev-dependencies]
+pollster = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
