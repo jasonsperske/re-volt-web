@@ -20,6 +20,8 @@ use crate::collision::{CollisionWorld, Contact, NCP_OBJECTS_IGNORE};
 use crate::formats::hul::Hull;
 use crate::formats::params::CarParams;
 use crate::materials;
+use crate::parts::{Aerial, PartsSetup};
+use crate::assets::PartKind;
 
 /// Physics step (physics_fixed_steps_b 0x441580).
 pub const DT: f32 = 0.008;
@@ -124,6 +126,8 @@ pub struct CarSetup {
     pub wheels: [WheelSetup; 4],
     /// Collision spheres (centre in car space, radius).
     pub hull: Vec<(Vec3, f32)>,
+    /// Springs, axles, pins, spinner and aerial (drawing only).
+    pub parts: PartsSetup,
 }
 
 impl CarSetup {
@@ -203,6 +207,7 @@ impl CarSetup {
             weapon_offset: Vec3::from(p.weapon),
             wheels,
             hull,
+            parts: PartsSetup::new(p),
         }
     }
 }
@@ -289,6 +294,9 @@ pub struct Car {
     pub top_speed_scale: f32,
     pub friction_override: Option<f32>,
     pub down_force_override: Option<f32>,
+    aerial: Option<Aerial>,
+    /// Spinner angle (radians), advanced per rendered frame.
+    spin_angle: f32,
 }
 
 impl Car {
@@ -320,7 +328,10 @@ impl Car {
             top_speed_scale: 1.0,
             friction_override: None,
             down_force_override: None,
+            aerial: None,
+            spin_angle: 0.0,
         };
+        car.aerial = car.setup.parts.aerial.as_ref().map(|a| Aerial::new(a, pos, rot));
         car.place(pos, rot);
         car
     }
@@ -340,6 +351,9 @@ impl Car {
         for n in 0..4 {
             self.wheels[n] = WheelState { flags: self.setup.wheels[n].flags, oil_timer: OIL_RECOVERY, ..Default::default() };
             self.place_wheel(n);
+        }
+        if let (Some(aerial), Some(setup)) = (&mut self.aerial, &self.setup.parts.aerial) {
+            aerial.reset(setup, pos, rot);
         }
         self.save_prev_pose();
     }
@@ -424,6 +438,7 @@ impl Car {
     /// Advances by `dt` seconds in fixed 8 ms steps, at most 10 per call,
     /// carrying the remainder (physics_fixed_steps_b).
     pub fn update(&mut self, world: &CollisionWorld, input: DriveInput, dt: f32) {
+        self.spin_angle = (self.spin_angle + self.setup.parts.spinner.2 * dt) % std::f32::consts::TAU;
         self.accumulator += dt;
         let mut steps = 0;
         while self.accumulator >= DT && steps < MAX_STEPS {
@@ -510,6 +525,40 @@ impl Car {
         (self.prev_pos.lerp(self.pos, t), self.prev_rot.slerp(self.rot, t))
     }
 
+    /// Where to draw a car part this frame, in game space: one (position,
+    /// rotation, local scale) per copy drawn. `offset` is the part's rest
+    /// offset; suspension parts are aimed at their wheel each frame
+    /// (docs/suspension.md).
+    pub fn render_part_transforms(&self, kind: PartKind, offset: Vec3) -> Vec<(Vec3, Quat, Vec3)> {
+        let (pos, rot) = self.render_pose();
+        let on_body = |(p, r, s): (Vec3, Quat, Vec3)| vec![(pos + rot * p, rot * r, s)];
+        let parts = &self.setup.parts;
+        match kind {
+            PartKind::Wheel(n) if self.wheel_present(n) => {
+                let (p, r) = self.render_wheel_transform(n);
+                vec![(p, r, Vec3::ONE)]
+            }
+            PartKind::Body | PartKind::Wheel(_) => on_body((offset, Quat::IDENTITY, Vec3::ONE)),
+            PartKind::Spring(n) => on_body(parts.spring(n, self.wheels[n].susp_pos)),
+            PartKind::Axle(n) => on_body(parts.axle(n, self.wheels[n].susp_pos)),
+            PartKind::Pin(n) => on_body(parts.pin(n, self.wheels[n].susp_pos)),
+            PartKind::Spinner => {
+                let (p, r) = parts.spinner(self.spin_angle);
+                on_body((p, r, Vec3::ONE))
+            }
+            PartKind::AerialSection | PartKind::AerialTop => {
+                let top = kind == PartKind::AerialTop;
+                self.aerial.as_ref().map_or_else(Vec::new, |a| {
+                    a.segments(self.step_fraction())
+                        .into_iter()
+                        .filter(|(i, ..)| (*i == 4) == top)
+                        .map(|(_, p, r, s)| (p, r, s))
+                        .collect()
+                })
+            }
+        }
+    }
+
     /// Interpolated wheel transform (see `render_pose`).
     pub fn render_wheel_transform(&self, n: usize) -> (Vec3, Quat) {
         let t = self.step_fraction();
@@ -537,6 +586,9 @@ impl Car {
         self.impulse += Vec3::Y * (self.setup.mass * GRAVITY * DT);
         self.body_world_collision(world);
         self.set_ang_resistance();
+        if let (Some(aerial), Some(setup)) = (&mut self.aerial, &self.setup.parts.aerial) {
+            aerial.step(setup, self.pos, self.rot, self.vel, DT);
+        }
     }
 
     /// car_control_input 0x41e750: rate-limited steering and throttle.

@@ -71,8 +71,17 @@ struct Race {
 
 struct CarPart {
     gpu: gl::GpuScene,
-    wheel: Option<usize>,
+    kind: crate::assets::PartKind,
     offset: Vec3,
+}
+
+/// Where to draw each copy of a car part this frame (the aerial's section
+/// model is drawn once per section).
+fn car_part_models(sim: &Car, part: &CarPart) -> Vec<Mat4> {
+    sim.render_part_transforms(part.kind, part.offset)
+        .into_iter()
+        .map(|(pos, rot, scale)| gl_model(pos, rot) * Mat4::from_scale(scale))
+        .collect()
 }
 
 /// A car model loaded once and shared by every racer driving it.
@@ -255,7 +264,7 @@ async fn ensure_model(game: &GameData<JsSource>, state: &Rc<RefCell<State>>, id:
     let mut parts = Vec::new();
     for p in scene::car_parts(&car) {
         let gpu = st.renderer.upload(&p.builder, &textures)?;
-        parts.push(CarPart { gpu, wheel: p.wheel, offset: Vec3::from(p.offset) });
+        parts.push(CarPart { gpu, kind: p.kind, offset: Vec3::from(p.offset) });
     }
     // Engine loops by car type. Inferred from file names, not from code.
     let engine_sound = match (car.id.as_str(), car.params.class) {
@@ -575,16 +584,8 @@ impl App {
                 st.renderer.begin(&fog);
                 let mut scenes = shop.scenes();
                 if let Some((_, sim, model)) = &st.shop_car {
-                    let (body_pos, body_rot) = sim.render_pose();
                     for part in &model.parts {
-                        let m = match part.wheel {
-                            Some(i) if i < 4 && sim.wheel_present(i) => {
-                                let (pos, rot) = sim.render_wheel_transform(i);
-                                gl_model(pos, rot)
-                            }
-                            _ => gl_model(body_pos + body_rot * part.offset, body_rot),
-                        };
-                        scenes.push((&part.gpu, m));
+                        scenes.extend(car_part_models(sim, part).into_iter().map(|m| (&part.gpu, m)));
                     }
                 }
                 st.renderer.draw(&scenes, proj * shop.view(), shop.eye(), &fog);
@@ -608,17 +609,8 @@ impl App {
             scenes.push((&l.gpu, Mat4::IDENTITY));
         }
         for racer in &st.racers {
-            let sim = &racer.sim;
-            let (body_pos, body_rot) = sim.render_pose();
             for part in &racer.model.parts {
-                let model = match part.wheel {
-                    Some(i) if i < 4 && sim.wheel_present(i) => {
-                        let (pos, rot) = sim.render_wheel_transform(i);
-                        gl_model(pos, rot)
-                    }
-                    _ => gl_model(body_pos + body_rot * part.offset, body_rot),
-                };
-                scenes.push((&part.gpu, model));
+                scenes.extend(car_part_models(&racer.sim, part).into_iter().map(|m| (&part.gpu, m)));
             }
         }
         if let Some(weapons) = &st.weapons {

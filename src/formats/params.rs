@@ -56,9 +56,46 @@ impl Wheel {
 
 #[derive(Clone, Debug, Default)]
 pub struct Spring {
+    pub model: Option<usize>,
+    /// Top mount, car space.
+    pub offset: [f32; 3],
+    /// Length of the model at rest.
+    pub length: f32,
     pub stiffness: f32,
     pub damping: f32,
     pub restitution: f32,
+}
+
+/// A drawn suspension link from the body to a wheel (`PIN`, `AXLE`).
+#[derive(Clone, Debug, Default)]
+pub struct Link {
+    pub model: Option<usize>,
+    /// Mount point, car space.
+    pub offset: [f32; 3],
+    pub length: f32,
+}
+
+/// A part spinning about `axis` (fans, propellers).
+#[derive(Clone, Debug, Default)]
+pub struct Spinner {
+    pub model: Option<usize>,
+    pub offset: [f32; 3],
+    pub axis: [f32; 3],
+    pub ang_vel: f32,
+}
+
+/// The whip aerial: section models stacked up to a top model.
+#[derive(Clone, Debug, Default)]
+pub struct Aerial {
+    pub section_model: Option<usize>,
+    pub top_model: Option<usize>,
+    /// Base, car space.
+    pub offset: [f32; 3],
+    /// Rest direction of the aerial (car space, -Y is up).
+    pub direction: [f32; 3],
+    pub length: f32,
+    pub stiffness: f32,
+    pub damping: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -82,6 +119,10 @@ pub struct CarParams {
     pub body: Body,
     pub wheels: [Wheel; 4],
     pub springs: [Spring; 4],
+    pub pins: [Link; 4],
+    pub axles: [Link; 4],
+    pub spinner: Spinner,
+    pub aerial: Aerial,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -91,6 +132,10 @@ enum Block {
     Body,
     Wheel(usize),
     Spring(usize),
+    Pin(usize),
+    Axle(usize),
+    Spinner,
+    Aerial,
     Other,
 }
 
@@ -120,6 +165,10 @@ pub fn parse(data: &[u8]) -> CarParams {
                 ("BODY", _) => Block::Body,
                 ("WHEEL", Some(n)) => Block::Wheel(n),
                 ("SPRING", Some(n)) => Block::Spring(n),
+                ("PIN", Some(n)) => Block::Pin(n),
+                ("AXLE", Some(n)) => Block::Axle(n),
+                ("SPINNER", _) => Block::Spinner,
+                ("AERIAL", _) => Block::Aerial,
                 _ => Block::Other,
             });
             continue;
@@ -209,9 +258,44 @@ pub fn parse(data: &[u8]) -> CarParams {
             Block::Spring(n) => {
                 let s = &mut car.springs[n];
                 match key.as_str() {
+                    "MODELNUM" => s.model = model_num(),
+                    "OFFSET" => s.offset = v3(1),
+                    "LENGTH" => s.length = num(1),
                     "STIFFNESS" => s.stiffness = num(1),
                     "DAMPING" => s.damping = num(1),
                     "RESTITUTION" => s.restitution = num(1),
+                    _ => {}
+                }
+            }
+            Block::Pin(n) | Block::Axle(n) => {
+                let l = if let Block::Pin(_) = block { &mut car.pins[n] } else { &mut car.axles[n] };
+                match key.as_str() {
+                    "MODELNUM" => l.model = model_num(),
+                    "OFFSET" => l.offset = v3(1),
+                    "LENGTH" => l.length = num(1),
+                    _ => {}
+                }
+            }
+            Block::Spinner => {
+                let sp = &mut car.spinner;
+                match key.as_str() {
+                    "MODELNUM" => sp.model = model_num(),
+                    "OFFSET" => sp.offset = v3(1),
+                    "AXIS" => sp.axis = v3(1),
+                    "ANGVEL" => sp.ang_vel = num(1),
+                    _ => {}
+                }
+            }
+            Block::Aerial => {
+                let a = &mut car.aerial;
+                match key.as_str() {
+                    "SECMODELNUM" => a.section_model = model_num(),
+                    "TOPMODELNUM" => a.top_model = model_num(),
+                    "OFFSET" => a.offset = v3(1),
+                    "DIRECTION" => a.direction = v3(1),
+                    "LENGTH" => a.length = num(1),
+                    "STIFFNESS" => a.stiffness = num(1),
+                    "DAMPING" => a.damping = num(1),
                     _ => {}
                 }
             }

@@ -124,12 +124,11 @@ pub fn level_scene(level: &crate::assets::LevelAssets) -> SceneBuilder {
     b
 }
 
-/// One drawable piece of a car, in its own local GL space; the body and each
-/// wheel move independently at runtime.
+/// One drawable piece of a car, in its own local GL space; the body,
+/// wheels and suspension parts move independently at runtime.
 pub struct CarPartScene {
     pub builder: SceneBuilder,
-    /// Physics wheel index, or `None` for the body.
-    pub wheel: Option<usize>,
+    pub kind: crate::assets::PartKind,
     /// Rest offset from the car origin (game space).
     pub offset: [f32; 3],
 }
@@ -139,11 +138,11 @@ pub struct CarPartScene {
 pub fn car_parts(car: &crate::assets::CarAssets) -> Vec<CarPartScene> {
     car.parts
         .iter()
-        .zip(&car.part_wheel)
-        .map(|(part, &wheel)| {
+        .zip(&car.part_kind)
+        .map(|(part, &kind)| {
             let mut builder = SceneBuilder::default();
             builder.add_mesh(&part.mesh, &Placement::at([0.0; 3]), |_| Some(0));
-            CarPartScene { builder, wheel, offset: part.offset }
+            CarPartScene { builder, kind, offset: part.offset }
         })
         .collect()
 }

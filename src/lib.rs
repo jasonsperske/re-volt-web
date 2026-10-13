@@ -8,6 +8,7 @@ pub mod camera;
 pub mod car;
 pub mod collision;
 pub mod materials;
+pub mod parts;
 pub mod race;
 pub mod disc;
 pub mod formats;

@@ -45,13 +45,28 @@ pub struct CarPart {
     pub offset: [f32; 3],
 }
 
+/// What a car part is, which decides how it's placed each frame. Indices
+/// are wheel slots (0..3), matching the physics.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PartKind {
+    Body,
+    Wheel(usize),
+    Spring(usize),
+    Axle(usize),
+    Pin(usize),
+    Spinner,
+    /// One aerial section model, drawn once per section.
+    AerialSection,
+    AerialTop,
+}
+
 pub struct CarAssets {
     pub id: String,
     pub params: params::CarParams,
-    /// Body first (when present), then the wheels in parameter order.
+    /// Body first (when present), then the wheels in parameter order, then
+    /// suspension, spinner and aerial parts.
     pub parts: Vec<CarPart>,
-    /// Index into `params.wheels` for each wheel part, `None` for the body.
-    pub part_wheel: Vec<Option<usize>>,
+    pub part_kind: Vec<PartKind>,
     pub texture: Option<bmp::Image>,
     /// From the `COLL` file; `None` if missing or unreadable.
     pub hull: Option<hul::Hull>,
@@ -60,7 +75,7 @@ pub struct CarAssets {
 impl CarAssets {
     /// Bounds of the body mesh in car space (game axes).
     pub fn body_bounds(&self) -> (glam::Vec3, glam::Vec3) {
-        let body = self.parts.iter().zip(&self.part_wheel).find(|(_, w)| w.is_none()).map(|(p, _)| p);
+        let body = self.parts.iter().zip(&self.part_kind).find(|(_, k)| **k == PartKind::Body).map(|(p, _)| p);
         let mut lo = glam::Vec3::splat(f32::MAX);
         let mut hi = glam::Vec3::splat(f32::MIN);
         for v in body.iter().flat_map(|p| p.mesh.verts.iter()) {
@@ -203,16 +218,25 @@ impl<S: ByteSource> GameData<S> {
     pub async fn load_car(&self, id: &str) -> Result<CarAssets, String> {
         let params = params::parse(&self.read(&format!("CARS/{id}/PARAMETERS.TXT")).await?);
         let mut parts = Vec::new();
-        let mut part_wheel = Vec::new();
-        if let Some(mesh) = self.load_model(&params, params.body.model).await {
-            parts.push(CarPart { mesh, offset: params.body.offset });
-            part_wheel.push(None);
+        let mut part_kind = Vec::new();
+        let p = &params;
+        let mut wanted = vec![(p.body.model, p.body.offset, PartKind::Body)];
+        for (n, w) in p.wheels.iter().enumerate() {
+            if w.present {
+                wanted.push((w.model, w.center(), PartKind::Wheel(n)));
+            }
+            // The game draws these whenever they have a model, wheel or not.
+            wanted.push((p.springs[n].model, p.springs[n].offset, PartKind::Spring(n)));
+            wanted.push((p.axles[n].model, p.axles[n].offset, PartKind::Axle(n)));
+            wanted.push((p.pins[n].model, p.pins[n].offset, PartKind::Pin(n)));
         }
-        // Wheel parts carry their slot (0..3), matching the physics.
-        for (n, w) in params.wheels.iter().enumerate().filter(|(_, w)| w.present) {
-            if let Some(mesh) = self.load_model(&params, w.model).await {
-                parts.push(CarPart { mesh, offset: w.center() });
-                part_wheel.push(Some(n));
+        wanted.push((p.spinner.model, p.spinner.offset, PartKind::Spinner));
+        wanted.push((p.aerial.section_model, p.aerial.offset, PartKind::AerialSection));
+        wanted.push((p.aerial.top_model, p.aerial.offset, PartKind::AerialTop));
+        for (slot, offset, kind) in wanted {
+            if let Some(mesh) = self.load_model(p, slot).await {
+                parts.push(CarPart { mesh, offset });
+                part_kind.push(kind);
             }
         }
         let texture = match &params.tpage {
@@ -223,7 +247,7 @@ impl<S: ByteSource> GameData<S> {
             Some(p) if self.exists(p) => hul::parse(&self.read(p).await?).ok(),
             _ => None,
         };
-        Ok(CarAssets { id: id.to_string(), params, parts, part_wheel, texture, hull })
+        Ok(CarAssets { id: id.to_string(), params, parts, part_kind, texture, hull })
     }
 
     /// Loads a standalone model (e.g. `MODELS/PICKUP.M`).
