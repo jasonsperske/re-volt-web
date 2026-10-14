@@ -97,6 +97,11 @@ leaves VR.
 In the menus, use the arrow keys or D-pad to move and change values, Enter or
 A to select, and Esc or B to go back. The mouse works too.
 
+These are the defaults. **Options → Controller Settings** remaps any of them
+to another key or gamepad button (the D-pad also steers by default). Your
+mapping is saved in the browser; **Reset to Default** puts it back. Esc and
+Start always open the menu.
+
 ### Racing tips
 
 - **Pickups** are the spinning lightning bolts on the track. Drive through one
@@ -156,6 +161,7 @@ npm run e2e:loading  # the loading bar, from a fresh pick and from the browser c
 npm run e2e:credits  # the credits, on the start screen and in the toy shop
 npm run e2e:workbench  # renaming and tuning a car on the workbench
 npm run e2e:vr       # VR mode, with a stand-in WebXR device
+npm run e2e:controls # remapping keys and gamepad buttons
 npm run tour         # screenshots every menu screen into e2e/shots/
 npm run screenshots  # retakes the README screenshots in docs/screenshots/
 ```

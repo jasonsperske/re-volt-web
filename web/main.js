@@ -22,6 +22,7 @@ const menu = new Menu($('menu'), (path) => sfx.play(path, 0.6));
 // Menus move the shop camera to their node while the front end is shown.
 menu.onNode = (node) => { if (app.frontend_shown()) app.fe_goto(node, 0.85); };
 window.__app = app; // for e2e tests and console debugging
+app.set_bindings(loadJson('controls'));
 window.__music = music;
 window.__sfx = sfx;
 window.__menu = menu;
@@ -448,9 +449,107 @@ function optionsMenu() {
     items: [
       { label: str(45, 'Game Settings'), action: () => menu.show(gameSettings()) },
       { label: str(47, 'Audio Settings'), action: () => menu.show(audioSettings()) },
+      { label: str(48, 'Controller Settings'), action: () => menu.show(controllerSettings()) },
     ],
   };
 }
+
+// ---- Controller Settings ----------------------------------------------------
+// Each action has keyboard keys and gamepad buttons; picking one waits for
+// the next key or button and binds it (taking it off any other action).
+// Saved in localStorage. Esc, Start, M and N keep their jobs.
+
+const ACTION_LABELS = {
+  accelerate: () => str(259, 'Accelerate'), brake: () => 'Brake / Reverse', left: () => 'Steer Left', right: () => 'Steer Right',
+  fire: () => str(261, 'Fire'), flip: () => str(262, 'Flip Car'), restart: () => 'Restart Race', camera: () => str(264, 'Change Camera'),
+};
+const RESERVED_KEYS = new Set(['Escape', 'KeyM', 'KeyN', 'KeyG']);
+const PAD_START = 9;
+const PAD_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'Back', 'Start', 'LS', 'RS', 'Pad Up', 'Pad Down', 'Pad Left', 'Pad Right'];
+const padName = (i) => PAD_NAMES[i] ?? `Button ${i}`;
+function keyName(code) {
+  const names = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Space: 'Space', Enter: 'Enter',
+    ShiftLeft: 'L Shift', ShiftRight: 'R Shift', ControlLeft: 'L Ctrl', ControlRight: 'R Ctrl', AltLeft: 'L Alt', AltRight: 'R Alt',
+    Backspace: 'Backspace', Tab: 'Tab' };
+  return names[code] ?? code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ');
+}
+const bindingText = (b) => `${b.keys.map(keyName).join(', ') || '-'} | ${b.pad.map(padName).join(', ') || '-'}`;
+
+function saveBindings(b) {
+  localStorageSet('controls', JSON.stringify(b));
+  app.set_bindings(b);
+  updateHelp();
+}
+
+function controllerSettings(selected = 0) {
+  const b = app.bindings();
+  const items = [{ label: '', text: 'Keyboard | Gamepad' }, ...Object.keys(ACTION_LABELS).map((action) => ({
+    label: ACTION_LABELS[action](),
+    value: bindingText(b[action]),
+    action: () => menu.show(captureBinding(action, Object.keys(ACTION_LABELS).indexOf(action) + 1)),
+  }))];
+  items.push({
+    label: 'Reset to Default', action: () => {
+      localStorageSet('controls', '');
+      app.set_bindings(null);
+      updateHelp();
+      menu.show(controllerSettings(items.length - 1));
+    },
+  });
+  return {
+    title: str(48, 'Controller Settings'), node: NODE.OPTIONS, back: () => menu.show(optionsMenu()), items,
+    onShow: () => { if (selected) menu.index = selected; },
+  };
+}
+
+function captureBinding(action, row) {
+  const done = (assign) => {
+    const b = app.bindings();
+    assign(b);
+    saveBindings(b);
+    menu.show(controllerSettings(row));
+  };
+  const cancel = () => menu.show(controllerSettings(row));
+  return {
+    title: ACTION_LABELS[action](), node: NODE.OPTIONS,
+    back: cancel,
+    items: [
+      { label: 'Press a key or gamepad button', text: '' },
+      { label: 'Esc or Start cancels', text: '' },
+    ],
+    onKey: (e) => {
+      if (e.code === 'Escape') { cancel(); return true; }
+      if (RESERVED_KEYS.has(e.code) || !e.code) return true;
+      done((b) => {
+        for (const other of Object.values(b)) other.keys = other.keys.filter((k) => k !== e.code);
+        b[action].keys = [e.code];
+      });
+      return true;
+    },
+    onPad: (buttons) => {
+      const i = buttons[0];
+      if (i === PAD_START) return cancel();
+      done((b) => {
+        for (const other of Object.values(b)) other.pad = other.pad.filter((p) => p !== i);
+        b[action].pad = [i];
+      });
+    },
+  };
+}
+
+// The help line under the race panel buttons, from the current mapping.
+function updateHelp() {
+  const b = app.bindings();
+  const keys = (a) => b[a].keys.map(keyName).join('/') || '-';
+  const pads = (a) => b[a].pad.map(padName).join('/') || '-';
+  $('help').innerHTML = `Drive: ${keys('accelerate')} accelerate · ${keys('brake')} brake & reverse · ${keys('left')}, ${keys('right')} steer · `
+    + `${keys('fire')} fire · ${keys('flip')} flip car · ${keys('restart')} restart · ${keys('camera')} camera: chase, far, low, free · `
+    + 'Esc menu · M music · N sound (free camera: WASD fly, Q/E down/up, click to mouse-look)<br>'
+    + `Gamepad: left stick steer · ${pads('accelerate')} accelerate · ${pads('brake')} brake & reverse · ${pads('fire')} fire · `
+    + `${pads('flip')} flip car · ${pads('restart')} restart · ${pads('camera')} camera · right stick look · Start menu`
+    + ' · Change these in Options → Controller Settings';
+}
+updateHelp();
 
 function gameSettings() {
   return {
@@ -763,7 +862,7 @@ addEventListener('keydown', (e) => {
   }
   if (menu.key(e)) return;
   if (e.code === 'Escape' && !e.repeat) return pause();
-  if (VIEW_KEYS.has(e.code)) e.preventDefault();
+  if (VIEW_KEYS.has(e.code) || Object.values(app.bindings()).some((b) => b.keys.includes(e.code))) e.preventDefault();
   if (e.code === 'KeyM' && !e.repeat) toggleMusic();
   if (e.code === 'KeyN' && !e.repeat) toggleSound();
   app.key(e.code, true);

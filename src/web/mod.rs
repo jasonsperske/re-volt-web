@@ -495,6 +495,48 @@ impl App {
         Ok(())
     }
 
+    /// The key and button mapping: `{action: {keys: [code…], pad: [button…]}}`
+    /// for each action in `input::ACTIONS`.
+    pub fn bindings(&self) -> JsValue {
+        let st = self.state.borrow();
+        let b = &st.input.bindings;
+        let out = Object::new();
+        for (i, action) in input::ACTIONS.iter().enumerate() {
+            let entry = Object::new();
+            let keys: Array = b.keys[i].iter().map(|k| JsValue::from(k.as_str())).collect();
+            let pad: Array = b.pad[i].iter().map(|&p| JsValue::from(p as u32)).collect();
+            let _ = Reflect::set(&entry, &"keys".into(), &keys);
+            let _ = Reflect::set(&entry, &"pad".into(), &pad);
+            let _ = Reflect::set(&out, &(*action).into(), &entry);
+        }
+        out.into()
+    }
+
+    /// Replaces the mapping (same shape as `bindings`); actions left out
+    /// keep their defaults. `null` restores every default.
+    pub fn set_bindings(&self, bindings: JsValue) {
+        let mut b = input::Bindings::default();
+        if bindings.is_object() {
+            for (i, action) in input::ACTIONS.iter().enumerate() {
+                let Ok(entry) = Reflect::get(&bindings, &(*action).into()) else { continue };
+                if !entry.is_object() {
+                    continue;
+                }
+                if let Ok(keys) = Reflect::get(&entry, &"keys".into()) {
+                    if Array::is_array(&keys) {
+                        b.keys[i] = Array::from(&keys).iter().filter_map(|k| k.as_string()).collect();
+                    }
+                }
+                if let Ok(pad) = Reflect::get(&entry, &"pad".into()) {
+                    if Array::is_array(&pad) {
+                        b.pad[i] = Array::from(&pad).iter().filter_map(|p| p.as_f64()).map(|p| p as usize).filter(|&p| p < 32).collect();
+                    }
+                }
+            }
+        }
+        self.state.borrow_mut().input.bindings = b;
+    }
+
     /// VR controller input for the next frame: throttle (−1 brake/reverse
     /// to 1), steering (−1 left to 1 right), and actions pressed this frame.
     pub fn set_xr_input(&self, throttle: f32, steer: f32, fire: bool, flip: bool, camera: bool) {

@@ -4,13 +4,21 @@
 //! This is an original controller built on the game's data, not a port of
 //! the game's AI code: pure-pursuit steering toward a point on the racing
 //! line ahead, speed chosen from the sharpness of the upcoming bends, and
-//! recovery when stuck or flipped.
+//! recovery when stuck or flipped (using Flip Car after 3 s, as the game's
+//! AI does at 0x408140).
 
 use glam::{Quat, Vec3};
 
 use crate::car::{Car, DriveInput};
 use crate::collision::CollisionWorld;
 use crate::formats::fan::AiNodes;
+
+/// How long a car is over on its side or roof before it flips itself.
+const FLIP_AFTER: f32 = 3.0;
+/// Flips in a row without getting going again before repositioning.
+const MAX_FLIPS: u32 = 3;
+/// Time without reaching a new racing-line node before repositioning.
+const LOST_AFTER: f32 = 8.0;
 
 pub struct AiDriver {
     /// Segment start: the car is between `node` and its next node.
@@ -24,6 +32,10 @@ pub struct AiDriver {
     stuck_time: f32,
     reverse_time: f32,
     flipped_time: f32,
+    /// Flips since the car last got going again.
+    flips: u32,
+    /// Time since the car last reached a new racing-line node.
+    since_progress: f32,
     /// Heading turned through (radians) since the last node advance; a full
     /// circle means the car is orbiting a target it can't reach.
     turned: f32,
@@ -40,6 +52,8 @@ impl AiDriver {
             stuck_time: 0.0,
             reverse_time: 0.0,
             flipped_time: 0.0,
+            flips: 0,
+            since_progress: 0.0,
             turned: 0.0,
             last_heading: None,
             seed: seed.wrapping_mul(2654435761).max(1),
@@ -72,8 +86,8 @@ impl AiDriver {
         Vec3::from(n.left).lerp(Vec3::from(n.right), t)
     }
 
-    /// Decides this frame's controls for `car`. May reposition a car that is
-    /// stuck upside down.
+    /// Decides this frame's controls for `car`. Flips a car that's stuck on
+    /// its side or roof, and repositions one that a flip can't help.
     pub fn drive(&mut self, nodes: &AiNodes, world: &CollisionWorld, car: &mut Car, dt: f32) -> DriveInput {
         if nodes.nodes.len() < 2 {
             return DriveInput::default();
@@ -84,6 +98,7 @@ impl AiDriver {
         let heading = car.forward();
         if self.node != before {
             self.turned = 0.0;
+            self.since_progress = 0.0;
         } else if let Some(h) = self.last_heading {
             let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or_zero();
             self.turned += flat(h).dot(flat(heading)).clamp(-1.0, 1.0).acos();
@@ -95,16 +110,42 @@ impl AiDriver {
             self.reverse_time = 1.0;
         }
 
-        // Flipped for a while: put the car back on the racing line (as the
-        // game's reposition does).
+        if car.is_flipping() {
+            return DriveInput::default();
+        }
+        self.since_progress += dt;
         if !car.is_upright() {
             self.flipped_time += dt;
         } else {
             self.flipped_time = 0.0;
+            if car.forward_speed() > 300.0 {
+                self.flips = 0;
+            }
         }
-        if self.flipped_time > 2.0 {
+        // Over for 3 s: Flip Car, like the game's AI (it needs the car to be
+        // touching something).
+        if self.flipped_time > FLIP_AFTER && self.flips < MAX_FLIPS && car.flip() {
             self.flipped_time = 0.0;
+            self.flips += 1;
             self.reverse_time = 0.0;
+            return DriveInput::default();
+        }
+        // A flip can't start or keeps failing, or the car is lost (e.g.
+        // flipped back onto its wheels below a raised road and can't get
+        // back up): put it back on the racing line, as the game's reposition
+        // does.
+        let lost = self.since_progress > LOST_AFTER;
+        if lost || self.flipped_time > 2.0 * FLIP_AFTER || (self.flips >= MAX_FLIPS && self.flipped_time > FLIP_AFTER) {
+            self.flipped_time = 0.0;
+            self.flips = 0;
+            self.since_progress = 0.0;
+            self.reverse_time = 0.0;
+            // A lost car goes on to the next node (the game's reposition
+            // also places cars past their current node), so it isn't put
+            // back at the foot of whatever stopped it.
+            if lost {
+                self.node = self.next_of(nodes, self.node);
+            }
             let next = self.next_of(nodes, self.node);
             let (a, b) = (self.line_point(nodes, self.node), self.line_point(nodes, next));
             let dir = (b - a).normalize_or(Vec3::Z);

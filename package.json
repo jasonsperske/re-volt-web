@@ -11,6 +11,7 @@
     "e2e:credits": "node e2e/credits.mjs",
     "e2e:workbench": "node e2e/workbench.mjs",
     "e2e:vr": "node e2e/vr.mjs",
+    "e2e:controls": "node e2e/controls.mjs",
     "tour": "node e2e/frontend_tour.mjs",
     "screenshots": "node e2e/readme_shots.mjs"
   },

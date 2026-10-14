@@ -18,9 +18,51 @@ const PAD_RT: usize = 7;
 const PAD_RB: usize = 5;
 const PAD_BACK: usize = 8;
 const PAD_LSTICK: usize = 10;
+const PAD_DLEFT: usize = 14;
+const PAD_DRIGHT: usize = 15;
+
+/// Remappable actions, in Controller Settings order.
+pub const ACTIONS: [&str; 8] = ["accelerate", "brake", "left", "right", "fire", "flip", "restart", "camera"];
+const ACCELERATE: usize = 0;
+const BRAKE: usize = 1;
+const LEFT: usize = 2;
+const RIGHT: usize = 3;
+const FIRE: usize = 4;
+const FLIP: usize = 5;
+const RESTART: usize = 6;
+const CAMERA: usize = 7;
+
+/// Keys (`KeyboardEvent.code`) and standard-mapping gamepad buttons for
+/// each of [`ACTIONS`]. The left stick always steers as well.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bindings {
+    pub keys: [Vec<String>; ACTIONS.len()],
+    pub pad: [Vec<usize>; ACTIONS.len()],
+}
+
+impl Default for Bindings {
+    fn default() -> Self {
+        let keys = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        Bindings {
+            keys: [
+                keys(&["KeyW", "ArrowUp"]),
+                keys(&["KeyS", "ArrowDown"]),
+                keys(&["KeyA", "ArrowLeft"]),
+                keys(&["KeyD", "ArrowRight"]),
+                keys(&["Space", "Enter"]),
+                keys(&["KeyF"]),
+                keys(&["KeyR"]),
+                keys(&["KeyC"]),
+            ],
+            pad: [vec![PAD_RT, PAD_A], vec![PAD_LT, PAD_X], vec![PAD_DLEFT], vec![PAD_DRIGHT], vec![PAD_B, PAD_RB], vec![PAD_LB], vec![PAD_Y], vec![PAD_BACK]],
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Input {
+    /// Current key and button mapping (Options → Controller Settings).
+    pub bindings: Bindings,
     keys: HashSet<String>,
     /// Keys pressed since the last frame (for one-shot actions).
     pressed: HashSet<String>,
@@ -88,20 +130,25 @@ impl Input {
     /// (keys, sticks); mouse deltas are already per-frame distances.
     pub fn take(&mut self, dt: f32) -> Controls {
         let k = |c: &str| if self.keys.contains(c) { 1.0f32 } else { 0.0 };
-        let either = |a: &str, b: &str| k(a).max(k(b));
+        let b = &self.bindings;
+        let held = |a: usize| if b.keys[a].iter().any(|c| self.keys.contains(c)) { 1.0f32 } else { 0.0 };
+        let pressed = |a: usize| b.keys[a].iter().any(|c| self.pressed.contains(c));
+        // The free camera strafes with the steering keys, but the arrow keys
+        // turn it instead.
+        let strafe = |a: usize| if b.keys[a].iter().any(|c| !c.starts_with("Arrow") && self.keys.contains(c)) { 1.0f32 } else { 0.0 };
         let mut c = Controls {
-            throttle: either("KeyW", "ArrowUp") - either("KeyS", "ArrowDown"),
-            steer: either("KeyD", "ArrowRight") - either("KeyA", "ArrowLeft"),
-            forward: either("KeyW", "ArrowUp") - either("KeyS", "ArrowDown"),
-            right: k("KeyD") - k("KeyA"),
+            throttle: held(ACCELERATE) - held(BRAKE),
+            steer: held(RIGHT) - held(LEFT),
+            forward: held(ACCELERATE) - held(BRAKE),
+            right: strafe(RIGHT) - strafe(LEFT),
             up: k("KeyE") + k("Space") - k("KeyQ") - k("ControlLeft"),
             boost: self.keys.contains("ShiftLeft") || self.keys.contains("ShiftRight"),
             yaw: (k("ArrowRight") - k("ArrowLeft")) * 2.0 * dt + self.mouse.0 * 0.003,
             pitch: -self.mouse.1 * 0.003,
-            reset_car: self.pressed.contains("KeyR"),
-            flip_car: self.pressed.contains("KeyF"),
-            toggle_camera: self.pressed.contains("KeyC"),
-            fire: self.pressed.contains("Space") || self.pressed.contains("Enter"),
+            reset_car: pressed(RESTART),
+            flip_car: pressed(FLIP),
+            toggle_camera: pressed(CAMERA),
+            fire: pressed(FIRE),
             gamepad: None,
         };
         self.pressed.clear();
@@ -122,9 +169,11 @@ impl Input {
             let down: Vec<bool> = buttons.iter().map(|&v| v > 0.5).collect();
             let just = |i: usize| down.get(i).copied().unwrap_or(false) && !self.pad_prev.get(i).copied().unwrap_or(false);
 
-            // Driving: left stick steers, RT/A accelerate, LT/X brake & reverse.
-            c.steer += axis(0);
-            c.throttle += button(PAD_RT).max(button(PAD_A)) - button(PAD_LT).max(button(PAD_X));
+            let value = |a: usize| b.pad[a].iter().map(|&i| button(i)).fold(0.0f32, f32::max);
+            let tapped = |a: usize| b.pad[a].iter().any(|&i| just(i));
+            // Driving: left stick (and the steering buttons) steer.
+            c.steer += axis(0) + value(RIGHT) - value(LEFT);
+            c.throttle += value(ACCELERATE) - value(BRAKE);
             // Free camera: left stick moves, right stick looks, triggers rise/fall.
             c.forward += -axis(1);
             c.right += axis(0);
@@ -132,10 +181,10 @@ impl Input {
             c.boost |= button(PAD_A) > 0.5 || button(PAD_LSTICK) > 0.5;
             c.yaw += axis(2) * 2.5 * dt;
             c.pitch += -axis(3) * 2.0 * dt;
-            c.reset_car |= just(PAD_Y);
-            c.flip_car |= just(PAD_LB);
-            c.toggle_camera |= just(PAD_BACK);
-            c.fire |= just(PAD_B) || just(PAD_RB);
+            c.reset_car |= tapped(RESTART);
+            c.flip_car |= tapped(FLIP);
+            c.toggle_camera |= tapped(CAMERA);
+            c.fire |= tapped(FIRE);
             c.gamepad = Some(pad.id());
             self.pad_prev = down;
         } else {

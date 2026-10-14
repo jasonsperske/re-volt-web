@@ -8,7 +8,9 @@
 // (x, y place the panel; it's centred otherwise).
 // `corner` is { label, action }: a gear button in the bottom-right corner
 // (also G, or Y on a gamepad). `onKey(e)` sees keys first (return true to
-// take one), for screens that accept typing. Items are either
+// take one), for screens that accept typing; `onPad(buttons)` gets newly
+// pressed gamepad buttons (indices) instead of the menu reading them.
+// Items are either
 //   { label, action }                                       — a button,
 //   { label, options: [{value, label}], value, onChange }   — a choice,
 //   { label, text }                                         — read-only info;
@@ -30,6 +32,7 @@ export class Menu {
     this.screen = null;
     this.index = 0;
     this.held = new Map();
+    this.rawPrev = [];
     this.lastPoll = 0;
     this.font = null; // { [color]: canvas }
     this.panel = { x: 0, y: 0, tx: 0, ty: 0, state: 'idle' };
@@ -343,6 +346,17 @@ export class Menu {
     this.lastPoll = t;
     const pad = [...(navigator.getGamepads?.() ?? [])].find((q) => q?.connected);
     const pressed = new Set();
+    const raw = pad ? pad.buttons.map((b) => b.value > 0.5) : [];
+    const fresh = raw.flatMap((down, i) => (down && !this.rawPrev[i] ? [i] : []));
+    this.rawPrev = raw;
+    if (this.screen?.onPad && this.panel.state === 'idle') {
+      if (fresh.length) this.screen.onPad(fresh);
+      // Buttons still down when this screen goes don't count as presses.
+      this.suppress = true;
+      this.draw(dt);
+      return new Set();
+    }
+    if (this.suppress && !raw.some(Boolean)) this.suppress = false;
     if (pad) {
       const button = (i) => (pad.buttons[i]?.value ?? 0) > 0.5;
       const axis = (i) => pad.axes[i] ?? 0;
@@ -354,7 +368,7 @@ export class Menu {
       for (const [name, down] of Object.entries(inputs)) {
         const prev = this.held.get(name);
         if (!down) { this.held.delete(name); continue; }
-        if (prev === undefined) { pressed.add(name); this.held.set(name, 0); continue; }
+        if (prev === undefined) { if (!this.suppress) pressed.add(name); this.held.set(name, 0); continue; }
         const next = prev + dt;
         if (['up', 'down', 'left', 'right'].includes(name) && next > REPEAT_DELAY &&
             Math.floor((next - REPEAT_DELAY) / REPEAT_RATE) > Math.floor((prev - REPEAT_DELAY) / REPEAT_RATE)) {
